@@ -1,98 +1,138 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# TaskFlow
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A modern internal task management system built with NestJS. Designed for development teams who need a clean, fast, and straightforward tool to plan work, track tasks, and collaborate — without the complexity of enterprise tools like Jira.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## Features
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+**Task Management**
 
-## Project setup
+- Create and manage tasks with title, description, status, priority, assignee, due date, labels, and story points
+- Drag-and-drop reordering on kanban boards
+- Bulk update tasks (status, priority, assignee, labels)
+- Checklists, file attachments, task links, and watchers
+- Human-readable task IDs per project (e.g. TF-1, TF-2)
 
-```bash
-$ npm install
+**Projects & Workspaces**
+
+- Workspace-level organization with role-based access control
+- Customizable kanban columns per project (name, color, WIP limits)
+- Project-level member management with role overrides
+- Sprint mode toggle per project
+
+**Sprint Planning**
+
+- Create and manage sprints with start/end dates and sprint goals
+- Start and complete sprints with configurable handling of incomplete tasks
+- Velocity tracking and burndown chart data
+
+**Collaboration**
+
+- Task comments with @mention support
+- Real-time notifications via WebSocket
+- Email notifications for assignments, due dates, and mentions
+- Full activity log and audit trail on every task
+
+**Authentication**
+
+- Invite-only registration — users join via email invite from workspace admin
+- JWT authentication with short-lived access tokens (15 min) and rotating refresh tokens (7 days)
+- HttpOnly cookie storage — tokens never accessible to JavaScript
+- Password reset via email
+
+**Search**
+
+- Global search across tasks, projects, and members
+- Project-scoped search with task number support (e.g. searching "TF-42")
+
+---
+
+## Tech Stack
+
+| Layer          | Technology                          |
+| -------------- | ----------------------------------- |
+| Framework      | NestJS + TypeScript                 |
+| Database       | MongoDB + Mongoose                  |
+| Cache          | Redis                               |
+| File Storage   | MinIO (S3-compatible)               |
+| Real-time      | Socket.io (WebSockets)              |
+| Email          | Nodemailer + Handlebars             |
+| Authentication | JWT + Passport                      |
+| Validation     | class-validator + class-transformer |
+
+---
+
+## Architecture
+
+The backend follows NestJS module-based architecture. Each feature is fully self-contained with its own schema, DTOs, service, and controller.
+
+```
+src/
+├── config/                  # Environment validation and typed config service
+├── database/                # MongoDB connection
+├── common/                  # Shared guards, decorators, filters, interceptors, utils
+└── modules/
+    ├── auth/                # Login, register, refresh, password reset, invites
+    ├── users/               # User schema
+    ├── workspaces/          # Workspace CRUD and member management
+    ├── projects/            # Project CRUD and kanban status configuration
+    ├── tasks/               # Task CRUD, filtering, bulk ops, drag-drop
+    ├── comments/            # Task comments and @mentions
+    ├── sprints/             # Sprint planning, velocity, burndown
+    ├── activity/            # Immutable audit log
+    ├── notifications/       # In-app and email notifications
+    ├── files/               # MinIO file upload and signed URL generation
+    └── search/              # Full-text search across tasks, projects, members
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## API Overview
 
-# watch mode
-$ npm run start:dev
+All endpoints are prefixed with `/api/v1`. Every response follows a consistent envelope:
 
-# production mode
-$ npm run start:prod
+```json
+// Success
+{ "success": true, "data": { ... } }
+
+// Error
+{ "success": false, "error": { "statusCode": 404, "message": "...", "path": "..." } }
 ```
 
-## Run tests
+| Module        | Base Path                                             |
+| ------------- | ----------------------------------------------------- |
+| Auth          | `/auth`                                               |
+| Workspaces    | `/workspaces`                                         |
+| Projects      | `/workspaces/:wsId/projects`                          |
+| Tasks         | `/workspaces/:wsId/projects/:pId/tasks`               |
+| Comments      | `/workspaces/:wsId/projects/:pId/tasks/:tId/comments` |
+| Sprints       | `/workspaces/:wsId/projects/:pId/sprints`             |
+| Activity      | `/workspaces/:wsId/projects/:pId/activity`            |
+| Notifications | `/notifications`                                      |
+| Files         | `/files`                                              |
+| Search        | `/search`                                             |
 
-```bash
-# unit tests
-$ npm run test
+---
 
-# e2e tests
-$ npm run test:e2e
+## Roles & Permissions
 
-# test coverage
-$ npm run test:cov
-```
+| Role   | Scope     | Description                                              |
+| ------ | --------- | -------------------------------------------------------- |
+| Owner  | Workspace | Full control. Can archive workspace, manage all members. |
+| Admin  | Workspace | Can manage members, create projects, edit settings.      |
+| Member | Workspace | Can create and manage tasks, comment, join projects.     |
+| Viewer | Workspace | Read-only access to all projects.                        |
+| Guest  | Project   | Access limited to specific projects only.                |
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Project Status
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Backend is complete. Frontend (React + TypeScript) and Docker Compose setup are in progress.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+---
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Author
 
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+**Anar** — [github.com/AnarDevJourney](https://github.com/AnarDevJourney)
