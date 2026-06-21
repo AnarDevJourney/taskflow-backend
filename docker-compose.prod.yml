@@ -1,0 +1,110 @@
+services:
+  # ─────────────────────────────────────────────────────────────────
+  # NestJS API
+  # ─────────────────────────────────────────────────────────────────
+  taskflow-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskflow-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env.docker
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - taskflow-network
+
+  # ─────────────────────────────────────────────────────────────────
+  # MongoDB
+  # ─────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: taskflow-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - taskflow-network
+
+  # ─────────────────────────────────────────────────────────────────
+  # Redis
+  # ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: taskflow-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - taskflow-network
+
+  # ─────────────────────────────────────────────────────────────────
+  # MinIO
+  # ─────────────────────────────────────────────────────────────────
+  minio:
+    image: quay.io/minio/minio
+    container_name: taskflow-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - '9000:9000' # API
+      - '9001:9001' # web console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - taskflow-network
+
+# ───────────────────────────────────────────────────────────────────
+# Named volumes — data survives container restarts and rebuilds
+# ───────────────────────────────────────────────────────────────────
+volumes:
+  mongo-data:
+  redis-data:
+  minio-data:
+
+# ───────────────────────────────────────────────────────────────────
+# Shared network — lets containers reach each other by service name
+# e.g. taskflow-api connects to MongoDB at "mongo:27017", not "localhost:27017"
+# ───────────────────────────────────────────────────────────────────
+networks:
+  taskflow-network:
+    driver: bridge

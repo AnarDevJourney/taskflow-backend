@@ -95,4 +95,8 @@ export class AppConfigService {
   get maxUploadBytes(): number {
     return this.config.get<number>('upload.maxMb', 50) * 1024 * 1024;
   }
+
+  get minioUseSSL(): boolean {
+    return this.config.get<boolean>('minio.useSSL', false);
+  }
 }

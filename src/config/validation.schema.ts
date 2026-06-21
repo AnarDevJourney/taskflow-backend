@@ -26,6 +26,7 @@ export const validationSchema = Joi.object({
   MINIO_ACCESS_KEY: Joi.string().required(),
   MINIO_SECRET_KEY: Joi.string().required(),
   MINIO_BUCKET: Joi.string().default('taskflow'),
+  MINIO_USE_SSL: Joi.string().valid('true', 'false').default('false'),
 
   // Email
   SMTP_HOST: Joi.string().required(),

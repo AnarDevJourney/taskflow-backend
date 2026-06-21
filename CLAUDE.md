@@ -17,6 +17,7 @@ REST API with JWT authentication (HttpOnly cookies), WebSockets for real-time up
 - **File storage**: MinIO (S3-compatible)
 - **Email**: Nodemailer + Handlebars templates
 - **Validation**: class-validator + class-transformer
+- **Containerization**: Docker + Docker Compose (dev and prod modes)
 
 ---
 
@@ -44,6 +45,17 @@ src/
     ├── notifications/    # in-app + email notifications
     ├── files/            # MinIO upload/download
     └── search/           # full-text search
+
+scripts/                  # bash scripts for running the project (see Docker section)
+├── dev.sh
+├── prod.sh
+└── stop.sh
+
+Dockerfile                  # multi-stage: builder → development → production
+docker-compose.dev.yml      # hot-reload dev environment (mounted src/)
+docker-compose.prod.yml     # production-style build (compiled dist/)
+.env.docker                 # env vars used by both compose files (gitignored)
+.env                        # env vars used when running outside Docker (gitignored)
 ```
 
 ---
@@ -72,14 +84,16 @@ AuthModule → (no deps on other feature modules)
 UsersModule → (schema only, no module deps)
 WorkspacesModule → AuthModule
 ProjectsModule → WorkspacesModule
-TasksModule → ProjectsModule, WorkspacesModule
-CommentsModule → TasksModule
-SprintsModule → ProjectsModule, TasksModule
+TasksModule → ProjectsModule, WorkspacesModule, ActivityModule, NotificationsModule
+CommentsModule → TasksModule, ActivityModule, NotificationsModule
+SprintsModule → ProjectsModule, WorkspacesModule (registers TaskSchema directly)
 ActivityModule → (standalone, called by other services)
-NotificationsModule → (standalone)
-FilesModule → (standalone)
-SearchModule → (standalone)
+NotificationsModule → (standalone, called by other services)
+FilesModule → (standalone, registers TaskSchema directly)
+SearchModule → (standalone, registers Task/Project/User schemas directly)
 ```
+
+Rule: import the **module** when you need its **service**. Register the **schema** directly with `MongooseModule.forFeature()` when you only need raw model access and importing the module would create a circular dependency.
 
 ---
 
@@ -214,6 +228,20 @@ async deleteTask(taskId: string, user: UserDocument) {
 
 ## Key Patterns Already Implemented
 
+### Fire-and-forget services
+
+`ActivityService.log()` and `NotificationsService.notify()` both wrap their logic in try/catch internally and never throw to the caller. If MongoDB or email momentarily fails, the user's actual operation (e.g. updating a task) still succeeds. Never wrap calls to these in try/catch in the calling service — it's redundant, they already handle their own errors.
+
+```typescript
+// ✅ correct — no try/catch needed, log() handles its own errors
+await this.activityService.log({ taskId, action: ActivityAction.STATUS_CHANGED, ... });
+
+// ❌ unnecessary — log() never throws
+try {
+  await this.activityService.log({ ... });
+} catch {}
+```
+
 ### Pagination (use for all list endpoints)
 
 ```typescript
@@ -249,6 +277,42 @@ this.config.jwtSecret
 process.env.JWT_SECRET
 ```
 
+### Soft delete pattern
+
+Nothing is permanently deleted immediately. Set `archivedAt` / `deletedAt` to `new Date()`, and all queries filter with `{ archivedAt: null }` or `{ deletedAt: null }`.
+
+---
+
+## Docker Setup
+
+The project runs fully in Docker with two separate modes — never mix files between them.
+
+| File                      | Purpose                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `Dockerfile`              | Multi-stage: `builder` → `development` → `production`                                                                   |
+| `docker-compose.dev.yml`  | Dev mode — mounts `./src` as a volume, runs `npm run start:dev` inside the container for hot-reload                     |
+| `docker-compose.prod.yml` | Prod mode — uses the compiled `dist/` from the `production` stage, no mounted source                                    |
+| `.env.docker`             | Shared by both compose files. Uses Docker service names as hostnames (`mongo`, `redis`, `minio`) instead of `localhost` |
+| `.env`                    | Used only when running the app directly with `npm run start:dev` outside Docker — uses `localhost`                      |
+
+### Scripts (always use these instead of raw docker compose commands)
+
+```bash
+./scripts/dev.sh     # starts all 4 containers detached, auto-opens a new terminal tailing taskflow-api logs
+./scripts/prod.sh    # starts all 4 containers detached in production mode, warns on placeholder JWT secrets
+./scripts/stop.sh    # interactive — asks which mode to stop, never deletes named volumes
+```
+
+Do not suggest `docker compose up` directly when helping with this project — the scripts already wrap the correct flags (`--build`, `-d`, the right `-f` file) and include safety checks (Docker running, `.env.docker` exists). Modify the scripts themselves if new behavior is needed, rather than telling the user to bypass them.
+
+### Key Docker facts to remember
+
+- All 4 services (`taskflow-api`, `mongo`, `redis`, `minio`) have healthchecks. `docker compose ps` should show `(healthy)` next to all of them when working correctly.
+- Named volumes (`mongo-data`, `redis-data`, `minio-data`) persist data across `docker compose down`. Only `docker compose down -v` wipes them — never suggest this casually.
+- MinIO's `useSSL` is controlled by `MINIO_USE_SSL` env var, intentionally decoupled from `NODE_ENV` — do not tie MinIO SSL back to `isProduction`, this caused a real bug (`EPROTO wrong version number`) when they were coupled.
+- The `development` Dockerfile stage does not copy `src/` — it's mounted at runtime by `docker-compose.dev.yml`. If you add new root-level config files that NestJS reads (e.g. a new `nest-cli.json`-like file), they need to be added to the `volumes:` list in `docker-compose.dev.yml` or the dev container won't see them.
+- Email templates (`.hbs` files) are copied explicitly in the production Dockerfile stage since they're read from disk at runtime, not bundled by the NestJS compiler.
+
 ---
 
 ## Completed Modules
@@ -266,17 +330,29 @@ process.env.JWT_SECRET
 - ✅ Notifications (in-app + email + WebSocket push + integrated into tasks, comments & auth)
 - ✅ Files (MinIO upload/download)
 - ✅ Search (full-text search)
+- ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 
-## Remaining Modules
+## Remaining Work
 
-All modules completed. 🎉
+- ⬜ Frontend (React + TypeScript) — not started
+- ⬜ README.md run instructions — deferred until frontend exists, do not add unprompted
 
 ---
 
 ## Running the Project
 
+Always prefer the scripts over raw commands:
+
 ```bash
-npm run start:dev     # development with watch mode
+./scripts/dev.sh      # daily development — hot-reload, logs auto-open in new terminal
+./scripts/prod.sh     # test production-style build
+./scripts/stop.sh     # stop containers (asks which mode)
+```
+
+Direct (non-Docker) commands are also available but only relevant when explicitly debugging outside Docker:
+
+```bash
+npm run start:dev     # development with watch mode, uses .env (localhost)
 npm run build         # production build
 npm run lint          # ESLint
 ```
@@ -285,4 +361,4 @@ npm run lint          # ESLint
 
 All env vars are validated at startup via Joi in `src/config/validation.schema.ts`.
 App will refuse to start if any required variable is missing.
-See `.env` for all required variables.
+Two env files exist — `.env` (local, non-Docker) and `.env.docker` (Docker, both dev and prod compose). Never commit either — both are gitignored.

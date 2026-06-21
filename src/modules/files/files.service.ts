@@ -45,7 +45,7 @@ export class FilesService implements OnModuleInit {
     this.minioClient = new Minio.Client({
       endPoint: this.config.minioEndpoint,
       port: this.config.minioPort,
-      useSSL: this.config.isProduction,
+      useSSL: this.config.minioUseSSL,
       accessKey: this.config.minioAccessKey,
       secretKey: this.config.minioSecretKey,
     });

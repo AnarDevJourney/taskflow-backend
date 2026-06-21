@@ -1,0 +1,106 @@
+services:
+  # ─────────────────────────────────────────────────────────────────
+  # NestJS API — DEVELOPMENT mode with hot-reload
+  # ─────────────────────────────────────────────────────────────────
+  taskflow-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: taskflow-api-dev
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+      - '9229:9229' # Node debugger port — optional, useful for VS Code debugging
+    env_file:
+      - .env.docker
+    volumes:
+      # mount source code — changes on your machine instantly reflect in the container
+      - ./src:/app/src
+      - ./test:/app/test
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./tsconfig.build.json:/app/tsconfig.build.json
+      - ./nest-cli.json:/app/nest-cli.json
+      # anonymous volume — keeps container's own node_modules,
+      # prevents your local node_modules from overwriting it
+      - /app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - taskflow-network
+
+  mongo:
+    image: mongo:7
+    container_name: taskflow-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - taskflow-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: taskflow-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - taskflow-network
+
+  minio:
+    image: quay.io/minio/minio
+    container_name: taskflow-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - taskflow-network
+
+volumes:
+  mongo-data:
+  redis-data:
+  minio-data:
+
+networks:
+  taskflow-network:
+    driver: bridge
