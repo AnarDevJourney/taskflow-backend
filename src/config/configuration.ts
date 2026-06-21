@@ -3,6 +3,9 @@ export default () => ({
     nodeEnv: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT ?? '3000', 10) || 3000,
     url: process.env.APP_URL || 'http://localhost:3000',
+    corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173').split(
+      ',',
+    ),
   },
   database: {
     uri: process.env.DATABASE_URI,

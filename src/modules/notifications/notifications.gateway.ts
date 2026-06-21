@@ -10,7 +10,10 @@ import { JwtService } from '@nestjs/jwt';
 import { AppConfigService } from '@config/config.service';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'],
+    credentials: true,
+  },
   namespace: '/notifications',
 })
 export class NotificationsGateway

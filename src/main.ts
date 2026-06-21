@@ -6,11 +6,18 @@ import { TransformInterceptor } from '@common/interceptors/transform.interceptor
 import { LoggingInterceptor } from '@common/interceptors/logging.interceptor';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import * as cookieParser from 'cookie-parser';
+import { AppConfigService } from '@config/config.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const appConfig = app.get(AppConfigService);
 
   app.use(cookieParser());
+
+  app.enableCors({
+    origin: appConfig.corsOrigins,
+    credentials: true,
+  });
 
   const reflector = app.get(Reflector);
 

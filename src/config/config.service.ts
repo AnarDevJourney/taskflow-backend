@@ -22,6 +22,12 @@ export class AppConfigService {
     return this.nodeEnv === 'production';
   }
 
+  get corsOrigins(): string[] {
+    return this.config.get<string[]>('app.corsOrigins', [
+      'http://localhost:5173',
+    ]);
+  }
+
   // ─── Database ───────────────────────────────────────────────────
   get databaseUri(): string {
     return this.config.get<string>('database.uri', '');
@@ -70,6 +76,10 @@ export class AppConfigService {
     return this.config.get<string>('minio.bucket', 'taskflow');
   }
 
+  get minioUseSSL(): boolean {
+    return this.config.get<boolean>('minio.useSSL', false);
+  }
+
   // ─── Email ──────────────────────────────────────────────────────
   get smtpHost(): string {
     return this.config.get<string>('email.host', '');
@@ -94,9 +104,5 @@ export class AppConfigService {
   // ─── Upload ─────────────────────────────────────────────────────
   get maxUploadBytes(): number {
     return this.config.get<number>('upload.maxMb', 50) * 1024 * 1024;
-  }
-
-  get minioUseSSL(): boolean {
-    return this.config.get<boolean>('minio.useSSL', false);
   }
 }
