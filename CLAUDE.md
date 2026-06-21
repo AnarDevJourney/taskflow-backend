@@ -283,6 +283,41 @@ Nothing is permanently deleted immediately. Set `archivedAt` / `deletedAt` to `n
 
 ---
 
+## Rate Limiting
+
+Rate limiting is applied globally via `ThrottlerGuard` registered as `APP_GUARD` in `AppModule`. Three named tiers are defined in `src/config/throttler.config.ts`:
+
+| Tier | TTL | Limit | Purpose |
+|---|---|---|---|
+| `default` | 60 s | 300 req | Applied to all routes automatically |
+| `auth` | 60 s | 10 req | Brute-force protection on credential endpoints |
+| `upload` | 1 h | 20 req | Expensive file-write operations |
+
+### Import rule
+
+Always import `Throttle` and `SkipThrottle` from `@common/decorators/throttle.decorator`, never directly from `@nestjs/throttler`:
+
+```typescript
+import { Throttle, SkipThrottle } from '@common/decorators/throttle.decorator';
+```
+
+### Applied overrides
+
+| Controller / endpoint | Decorator | Reason |
+|---|---|---|
+| `AppController GET /health` | `@SkipThrottle()` | Docker healthcheck polls every 10 s — must never be rate limited or the container reports unhealthy |
+| `AuthController POST /login` | `@Throttle({ auth: ... })` | Credential brute-force |
+| `AuthController POST /register` | `@Throttle({ auth: ... })` | Account creation spam |
+| `AuthController POST /forgot-password` | `@Throttle({ auth: ... })` | Email enumeration + spam |
+| `AuthController POST /reset-password` | `@Throttle({ auth: ... })` | Token brute-force |
+| `FilesController POST /files/upload` | `@Throttle({ upload: ... })` | MinIO write is expensive |
+
+### Rule: `@SkipThrottle()` is mandatory on health / readiness endpoints
+
+Any endpoint polled by Docker, Kubernetes, or a load-balancer health probe **must** have `@SkipThrottle()`. Forgetting it causes the container to be marked unhealthy and restarted under normal traffic.
+
+---
+
 ## Docker Setup
 
 The project runs fully in Docker with two separate modes — never mix files between them.

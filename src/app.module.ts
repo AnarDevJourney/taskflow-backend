@@ -13,9 +13,13 @@ import { ActivityModule } from './modules/activity/activity.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FilesModule } from './modules/files/files.module';
 import { SearchModule } from './modules/search/search.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { throttlerConfig } from './config/throttler.config';
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot(throttlerConfig),
     AppConfigModule,
     DatabaseModule,
     AuthModule,
@@ -30,6 +34,12 @@ import { SearchModule } from './modules/search/search.module';
     SearchModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

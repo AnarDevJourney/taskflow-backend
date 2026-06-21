@@ -19,6 +19,7 @@ import { Public } from '@common/decorators/public.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { UserDocument } from '@modules/users/schemas/user.schema';
 import { AppConfigService } from '@config/config.service';
+import { Throttle } from '@common/decorators/throttle.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -29,6 +30,7 @@ export class AuthController {
 
   // ─── Login ──────────────────────────────────────────────────────
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -50,6 +52,7 @@ export class AuthController {
 
   // ─── Register ───────────────────────────────────────────────────
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(
@@ -87,6 +90,7 @@ export class AuthController {
 
   // ─── Forgot Password ────────────────────────────────────────────
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -95,6 +99,7 @@ export class AuthController {
 
   // ─── Reset Password ─────────────────────────────────────────────
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   resetPassword(@Body() dto: ResetPasswordDto) {
