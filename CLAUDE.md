@@ -366,6 +366,15 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Files (MinIO upload/download)
 - ✅ Search (full-text search)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
+- ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
+
+## API Documentation
+
+Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'production'`). It is never mounted in production.
+
+- **Auth**: The API uses HttpOnly cookie authentication, not Bearer tokens. Call `POST /api/v1/auth/login` first — two cookies are set automatically: `access_token` (15 min) and `refresh_token` (7 days, path-scoped to `/api/v1/auth/refresh`). Enable "withCredentials" in the Swagger UI options (already configured) so cookies are sent.
+- **Security schemes**: Two cookie auth schemes are declared — `cookie-access-token` (all protected routes) and `cookie-refresh-token` (refresh endpoint only).
+- **New endpoints**: Add `@ApiTags('GroupName')` to the controller, `@ApiOperation({ summary: '...' })` and `@ApiResponse()` to each handler, `@ApiProperty()` / `@ApiPropertyOptional()` to every DTO field, and `@ApiParam()` for route parameters. Follow the same pattern as existing controllers.
 
 ## Remaining Work
 

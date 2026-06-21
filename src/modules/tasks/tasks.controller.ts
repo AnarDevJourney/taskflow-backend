@@ -10,6 +10,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+  ApiCookieAuth,
+} from '@nestjs/swagger';
 import { TasksService } from './tasks.service';
 import { TasksQueryService } from './tasks-query.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -20,6 +28,8 @@ import { QueryTasksDto } from './dto/query-tasks.dto';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { UserDocument } from '@modules/users/schemas/user.schema';
 
+@ApiTags('Tasks')
+@ApiCookieAuth('cookie-access-token')
 @Controller('workspaces/:workspaceId/projects/:projectId/tasks')
 export class TasksController {
   constructor(
@@ -30,6 +40,14 @@ export class TasksController {
   // ─── Task CRUD ───────────────────────────────────────────────────
 
   @Post()
+  @ApiOperation({ summary: 'Create a new task in a project' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiResponse({ status: 201, description: 'Task created' })
+  @ApiResponse({ status: 400, description: 'Invalid status — does not match any project status column' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Workspace or project not found' })
   create(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -40,6 +58,12 @@ export class TasksController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List tasks in a project with optional filtering, sorting and pagination' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiResponse({ status: 200, description: 'Paginated list of tasks with meta' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 404, description: 'Workspace or project not found' })
   findAll(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -51,6 +75,14 @@ export class TasksController {
   }
 
   @Get(':taskId')
+  @ApiOperation({ summary: 'Get a single task by ID' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Task found with populated assignee, reporter and watchers' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   findOne(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -61,6 +93,15 @@ export class TasksController {
   }
 
   @Patch(':taskId')
+  @ApiOperation({ summary: 'Update a task\'s fields' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Task updated — activity and notifications fired for relevant field changes' })
+  @ApiResponse({ status: 400, description: 'Invalid status value' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -72,6 +113,15 @@ export class TasksController {
   }
 
   @Patch(':taskId/reorder')
+  @ApiOperation({ summary: 'Move a task to a new position or column (drag-and-drop)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Task reordered' })
+  @ApiResponse({ status: 400, description: 'Invalid target status' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   reorder(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -84,6 +134,14 @@ export class TasksController {
 
   @Delete(':taskId')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Archive a task (soft-delete — reporter, admin or owner only)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Task archived' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Only the reporter, admin, or owner can delete tasks' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -97,6 +155,14 @@ export class TasksController {
 
   @Patch()
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk-update multiple tasks at once (status, priority, assignee, labels)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiResponse({ status: 200, description: 'Returns count of updated tasks' })
+  @ApiResponse({ status: 400, description: 'Invalid status or no task IDs provided' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Workspace or project not found' })
   bulkUpdate(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -110,6 +176,14 @@ export class TasksController {
 
   @Post(':taskId/watch')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Subscribe to a task to receive comment/change notifications' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Watcher added (idempotent — safe to call if already watching)' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   addWatcher(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -121,6 +195,14 @@ export class TasksController {
 
   @Delete(':taskId/watch')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unsubscribe from task notifications' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 200, description: 'Watcher removed' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   removeWatcher(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -138,6 +220,14 @@ export class TasksController {
   // ─── Checklist ───────────────────────────────────────────────────
 
   @Post(':taskId/checklist')
+  @ApiOperation({ summary: 'Add a checklist item to a task' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiResponse({ status: 201, description: 'Checklist item added' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   addChecklistItem(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
@@ -155,6 +245,16 @@ export class TasksController {
   }
 
   @Patch(':taskId/checklist/:itemIndex')
+  @ApiOperation({ summary: 'Toggle a checklist item\'s completed state' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiParam({ name: 'taskId', description: 'MongoDB ObjectId of the task' })
+  @ApiParam({ name: 'itemIndex', description: '0-based index of the checklist item to toggle' })
+  @ApiResponse({ status: 200, description: 'Checklist item toggled' })
+  @ApiResponse({ status: 400, description: 'Item index out of range' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Task, project, or workspace not found' })
   toggleChecklistItem(
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,

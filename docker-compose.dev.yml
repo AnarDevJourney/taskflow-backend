@@ -14,6 +14,8 @@ services:
       - '9229:9229' # Node debugger port — optional, useful for VS Code debugging
     env_file:
       - .env.docker
+    environment:
+      NODE_ENV: development
     volumes:
       # mount source code — changes on your machine instantly reflect in the container
       - ./src:/app/src
