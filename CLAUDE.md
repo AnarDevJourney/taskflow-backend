@@ -393,6 +393,18 @@ Always prefer the scripts over raw commands:
 ./scripts/stop.sh     # stop containers (asks which mode)
 ```
 
+### Seeding the database
+
+The seed script must run **inside** the dev container — `mongo` only resolves within the Docker network:
+
+```bash
+docker exec -it taskflow-api-dev npm run seed:docker
+```
+
+Never run `npm run seed:docker` directly on the host — it will fail with `EAI_AGAIN mongo` because the `mongo` hostname isn't reachable outside Docker. Use `npm run seed` (no `:docker`) only when running the app outside Docker with a `localhost` connection in `.env`.
+
+---
+
 Direct (non-Docker) commands are also available but only relevant when explicitly debugging outside Docker:
 
 ```bash
