@@ -106,7 +106,7 @@ export class CommentsService {
     // notify watchers (excluding author and already-mentioned users)
     const mentionSet = new Set(mentionIds);
     const watcherIds = task.watchers
-      .map((w) => w.toString())
+      .map((w) => (w._id ?? w).toString())
       .filter((id) => id !== actorId && !mentionSet.has(id));
 
     if (watcherIds.length > 0) {
