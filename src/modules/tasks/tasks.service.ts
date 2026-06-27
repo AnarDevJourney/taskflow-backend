@@ -465,6 +465,9 @@ export class TasksService {
 
     task.checklist[itemIndex].completed = !task.checklist[itemIndex].completed;
     const isNowCompleted = task.checklist[itemIndex].completed;
+
+    task.markModified('checklist');
+
     const saved = await task.save();
 
     await this.activityService.log({
