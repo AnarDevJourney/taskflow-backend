@@ -8,6 +8,10 @@ import {
 } from '@modules/projects/schemas/project.schema';
 import { UserDocument } from '@modules/users/schemas/user.schema';
 import { User } from '@modules/users/schemas/user.schema';
+import {
+  Workspace,
+  WorkspaceDocument,
+} from '@modules/workspaces/schemas/workspace.schema';
 import { toObjectId } from '@common/utils/object-id';
 
 const MAX_RESULTS = 10;
@@ -18,6 +22,7 @@ export class SearchService {
     @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Workspace.name) private workspaceModel: Model<WorkspaceDocument>,
   ) {}
 
   // ─── Global search ───────────────────────────────────────────────
@@ -88,12 +93,16 @@ export class SearchService {
 
   // ─── Member search ───────────────────────────────────────────────
   private async searchMembers(query: string, workspaceId: Types.ObjectId) {
-    // get workspace member IDs first
-    const { Workspace } =
-      await import('@modules/workspaces/schemas/workspace.schema');
+    const workspace = await this.workspaceModel
+      .findById(workspaceId)
+      .select('members.userId')
+      .lean();
+
+    const memberIds = workspace?.members?.map((m) => m.userId) ?? [];
 
     return this.userModel
       .find({
+        _id: { $in: memberIds },
         $or: [
           { name: { $regex: query, $options: 'i' } },
           { email: { $regex: query, $options: 'i' } },

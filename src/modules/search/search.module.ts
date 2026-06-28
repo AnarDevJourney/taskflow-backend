@@ -8,6 +8,10 @@ import {
   ProjectSchema,
 } from '@modules/projects/schemas/project.schema';
 import { User, UserSchema } from '@modules/users/schemas/user.schema';
+import {
+  Workspace,
+  WorkspaceSchema,
+} from '@modules/workspaces/schemas/workspace.schema';
 
 @Module({
   imports: [
@@ -15,6 +19,7 @@ import { User, UserSchema } from '@modules/users/schemas/user.schema';
       { name: Task.name, schema: TaskSchema },
       { name: Project.name, schema: ProjectSchema },
       { name: User.name, schema: UserSchema },
+      { name: Workspace.name, schema: WorkspaceSchema },
     ]),
     // no feature module deps — registers schemas directly
     // to avoid circular dependency chains
