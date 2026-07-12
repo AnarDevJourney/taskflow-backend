@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -11,9 +12,15 @@ import { JwtService } from '@nestjs/jwt';
 import { Model } from 'mongoose';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '@common/redis/redis.constants';
 import { AppConfigService } from '@config/config.service';
 import { User, UserDocument } from '@modules/users/schemas/user.schema';
 import { Invite, InviteDocument } from './schemas/invite.schema';
+import {
+  Workspace,
+  WorkspaceDocument,
+} from '@modules/workspaces/schemas/workspace.schema';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/reset-password.dto';
@@ -23,6 +30,24 @@ import { EmailService } from '@modules/notifications/email.service';
 
 const BCRYPT_ROUNDS = 12;
 const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
+const REFRESH_BLACKLIST_PREFIX = 'refresh_blacklist:';
+
+const DURATION_UNIT_SECONDS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 60 * 60,
+  d: 60 * 60 * 24,
+  w: 60 * 60 * 24 * 7,
+};
+
+// parses jwt-style duration strings ('15m', '7d', '3600s') into seconds
+function parseDurationToSeconds(duration: string): number {
+  const match = /^(\d+)([smhdw])$/.exec(duration.trim());
+  if (!match) return 60 * 60 * 24 * 7; // safe fallback — 7 days
+
+  const [, amount, unit] = match;
+  return Number(amount) * DURATION_UNIT_SECONDS[unit];
+}
 
 @Injectable()
 export class AuthService {
@@ -31,9 +56,11 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Invite.name) private inviteModel: Model<InviteDocument>,
+    @InjectModel(Workspace.name) private workspaceModel: Model<WorkspaceDocument>,
     private jwtService: JwtService,
     private config: AppConfigService,
     private emailService: EmailService,
+    @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
   // ─── Login ──────────────────────────────────────────────────────
@@ -114,6 +141,11 @@ export class AuthService {
       password: hashedPassword,
     });
 
+    // add the new user as a member of the workspace they were invited to
+    await this.workspaceModel.findByIdAndUpdate(invite.workspaceId, {
+      $push: { members: { userId: user._id, role: invite.role, joinedAt: new Date() } },
+    });
+
     // delete invite so it can't be reused
     await this.inviteModel.deleteOne({ token: dto.token });
 
@@ -123,8 +155,37 @@ export class AuthService {
   }
 
   // ─── Refresh Tokens ─────────────────────────────────────────────
-  async refresh(user: UserDocument) {
+  async refresh(user: UserDocument, tokenId: string) {
+    const isBlacklisted = await this.redis.get(
+      `${REFRESH_BLACKLIST_PREFIX}${tokenId}`,
+    );
+
+    if (isBlacklisted) {
+      throw new UnauthorizedException(
+        'Refresh token has been revoked — please log in again',
+      );
+    }
+
     return this.issueTokens(user);
+  }
+
+  // ─── Logout ─────────────────────────────────────────────────────
+  // blacklists the token pair's shared jti in Redis so the refresh
+  // token can never be used again, even though its JWT signature
+  // would otherwise still validate until it expires. We use the
+  // access token's tokenId (always available — logout requires it)
+  // rather than reading the refresh_token cookie directly, since
+  // that cookie is intentionally path-scoped to /auth/refresh only
+  // and is never sent to /auth/logout.
+  async logout(tokenId: string) {
+    const ttlSeconds = parseDurationToSeconds(this.config.jwtRefreshExpiresIn);
+
+    await this.redis.set(
+      `${REFRESH_BLACKLIST_PREFIX}${tokenId}`,
+      '1',
+      'EX',
+      ttlSeconds,
+    );
   }
 
   // ─── Forgot Password ────────────────────────────────────────────
@@ -144,7 +205,13 @@ export class AuthService {
       passwordResetExpiresAt: expiresAt,
     });
 
-    // TODO: fire email job with reset link
+    const resetUrl = `${this.config.appUrl}/reset-password?token=${resetToken}`;
+    await this.emailService.sendPasswordReset(user.email, {
+      name: user.name,
+      resetUrl,
+      lang: dto.lang,
+    });
+
     this.logger.log(`Password reset requested for ${user.email}`);
   }
 
@@ -205,17 +272,19 @@ export class AuthService {
   // ─── Token helpers ──────────────────────────────────────────────
   private issueTokens(user: UserDocument) {
     const userId = (user._id as any).toString();
+    const tokenId = randomBytes(16).toString('hex');
 
     const accessPayload: JwtPayload = {
       sub: userId,
       email: user.email,
       workspaceId: '', // will be set properly once workspaces module is done
       role: '',
+      tokenId,
     };
 
     const refreshPayload: JwtRefreshPayload = {
       sub: userId,
-      tokenId: randomBytes(16).toString('hex'),
+      tokenId,
     };
 
     const accessToken = this.jwtService.sign(accessPayload, {

@@ -8,6 +8,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { User, UserSchema } from '@modules/users/schemas/user.schema';
 import { Invite, InviteSchema } from './schemas/invite.schema';
+import {
+  Workspace,
+  WorkspaceSchema,
+} from '@modules/workspaces/schemas/workspace.schema';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
 
 @Module({
@@ -17,6 +21,7 @@ import { NotificationsModule } from '@modules/notifications/notifications.module
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Invite.name, schema: InviteSchema },
+      { name: Workspace.name, schema: WorkspaceSchema }, // schema only — avoids circular dep with WorkspacesModule
     ]),
     NotificationsModule,
   ],

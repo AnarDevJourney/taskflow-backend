@@ -4,6 +4,7 @@ import { WorkspaceRole } from '../enums/workspace-role.enum';
 
 export type WorkspaceDocument = Workspace & Document;
 
+@Schema({ _id: true })
 export class WorkspaceMember {
   @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
   userId: Types.ObjectId;
@@ -14,6 +15,8 @@ export class WorkspaceMember {
   @Prop({ default: Date.now })
   joinedAt: Date;
 }
+
+export const WorkspaceMemberSchema = SchemaFactory.createForClass(WorkspaceMember);
 
 @Schema({ timestamps: true })
 export class Workspace {
@@ -29,7 +32,7 @@ export class Workspace {
   @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
   ownerId: Types.ObjectId;
 
-  @Prop({ type: [WorkspaceMember], default: [] })
+  @Prop({ type: [WorkspaceMemberSchema], default: [] })
   members: WorkspaceMember[];
 
   @Prop({ default: null })

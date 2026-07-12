@@ -5,6 +5,46 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Handlebars from 'handlebars';
 
+const PASSWORD_RESET_TRANSLATIONS: Record<
+  string,
+  {
+    subject: string;
+    greeting: string;
+    intro: string;
+    button: string;
+    expiry: string;
+    footer: string;
+  }
+> = {
+  en: {
+    subject: 'Reset your TaskFlow password',
+    greeting: 'Hi {{name}},',
+    intro: 'We received a request to reset the password for your TaskFlow account.',
+    button: 'Reset Password',
+    expiry: 'This link expires in 1 hour.',
+    footer:
+      "If you didn't request a password reset, you can safely ignore this email — your password will not be changed.",
+  },
+  ru: {
+    subject: 'Сброс пароля TaskFlow',
+    greeting: 'Здравствуйте, {{name}},',
+    intro: 'Мы получили запрос на сброс пароля для вашей учётной записи TaskFlow.',
+    button: 'Сбросить пароль',
+    expiry: 'Срок действия этой ссылки — 1 час.',
+    footer:
+      'Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо — ваш пароль останется без изменений.',
+  },
+  az: {
+    subject: 'TaskFlow şifrənizi sıfırlayın',
+    greeting: 'Salam {{name}},',
+    intro: 'TaskFlow hesabınız üçün şifrə sıfırlama tələbi aldıq.',
+    button: 'Şifrəni sıfırla',
+    expiry: 'Bu link 1 saat ərzində etibarlıdır.',
+    footer:
+      'Əgər siz şifrə sıfırlamağı tələb etməmisinizsə, bu email-i sadəcə nəzərə almaya bilərsiniz — şifrəniz dəyişməyəcək.',
+  },
+};
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -105,6 +145,28 @@ export class EmailService {
       'invite-member',
       context,
     );
+  }
+
+  async sendPasswordReset(
+    to: string,
+    context: {
+      name: string;
+      resetUrl: string;
+      lang?: string;
+    },
+  ) {
+    const t =
+      PASSWORD_RESET_TRANSLATIONS[context.lang ?? 'en'] ??
+      PASSWORD_RESET_TRANSLATIONS.en;
+
+    await this.sendMail(to, t.subject, 'password-reset', {
+      resetUrl: context.resetUrl,
+      greeting: t.greeting.replace('{{name}}', context.name),
+      intro: t.intro,
+      buttonLabel: t.button,
+      expiryNote: t.expiry,
+      footerNote: t.footer,
+    });
   }
 
   // ─── Template renderer ───────────────────────────────────────────

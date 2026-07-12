@@ -3,6 +3,7 @@ export interface JwtPayload {
   email: string;
   workspaceId: string;
   role: string;
+  tokenId: string; // shared with the paired refresh token — lets logout blacklist it
 }
 
 export interface JwtRefreshPayload {

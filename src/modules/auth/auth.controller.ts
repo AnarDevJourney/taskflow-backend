@@ -94,10 +94,13 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'New tokens issued — both cookies updated' })
   @ApiResponse({ status: 401, description: 'Missing or invalid refresh_token cookie' })
   async refresh(
-    @CurrentUser() user: UserDocument,
+    @CurrentUser() user: UserDocument & { tokenId: string },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken } = await this.authService.refresh(user);
+    const { accessToken, refreshToken } = await this.authService.refresh(
+      user,
+      user.tokenId,
+    );
     this.setTokenCookies(res, accessToken, refreshToken);
     return { message: 'Tokens refreshed' };
   }
@@ -105,13 +108,20 @@ export class AuthController {
   // ─── Logout ─────────────────────────────────────────────────────
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Log out — clears access_token and refresh_token cookies' })
+  @ApiOperation({ summary: 'Log out — blacklists the refresh token and clears cookies' })
   @ApiCookieAuth('cookie-access-token')
   @ApiResponse({ status: 200, description: 'Logged out successfully' })
   @ApiResponse({ status: 401, description: 'Not authenticated' })
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(
+    @CurrentUser() user: UserDocument & { tokenId: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.logout(user.tokenId);
     res.clearCookie('access_token');
-    res.clearCookie('refresh_token');
+    // must match the path used in setTokenCookies() — clearCookie only
+    // deletes a cookie whose path attribute matches exactly, otherwise
+    // the browser treats it as an unrelated cookie and it survives
+    res.clearCookie('refresh_token', { path: '/api/v1/auth/refresh' });
     return { message: 'Logged out successfully' };
   }
 

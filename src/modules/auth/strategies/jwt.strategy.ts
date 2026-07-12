@@ -32,6 +32,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException('User not found or inactive');
     }
 
+    // attach the access token's jti so /auth/logout can blacklist the
+    // paired refresh token without needing the path-scoped refresh cookie
+    (user as unknown as { tokenId: string }).tokenId = payload.tokenId;
+
     return user;
   }
 }

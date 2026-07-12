@@ -3,6 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppConfigModule } from '@config/config.module';
 import { DatabaseModule } from '@database/database.module';
+import { RedisModule } from '@common/redis/redis.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
 import { ProjectsModule } from '@modules/projects/projects.module';
@@ -22,6 +23,7 @@ import { throttlerConfig } from './config/throttler.config';
     ThrottlerModule.forRoot(throttlerConfig),
     AppConfigModule,
     DatabaseModule,
+    RedisModule,
     AuthModule,
     WorkspacesModule,
     ProjectsModule,

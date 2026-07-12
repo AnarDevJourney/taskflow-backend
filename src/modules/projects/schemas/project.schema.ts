@@ -19,6 +19,7 @@ export class StatusConfig {
   wipLimit: number;
 }
 
+@Schema({ _id: true })
 export class ProjectMember {
   @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
   userId: Types.ObjectId;
@@ -29,6 +30,8 @@ export class ProjectMember {
   @Prop({ default: Date.now })
   joinedAt: Date;
 }
+
+export const ProjectMemberSchema = SchemaFactory.createForClass(ProjectMember);
 
 @Schema({ timestamps: true })
 export class Project {
@@ -48,7 +51,7 @@ export class Project {
   @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
   ownerId: Types.ObjectId;
 
-  @Prop({ type: [ProjectMember], default: [] })
+  @Prop({ type: [ProjectMemberSchema], default: [] })
   members: ProjectMember[];
 
   // customizable kanban columns
