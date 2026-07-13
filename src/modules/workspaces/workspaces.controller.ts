@@ -49,6 +49,14 @@ export class WorkspacesController {
     return this.workspacesService.findMyWorkspaces(user);
   }
 
+  @Get('archived')
+  @ApiOperation({ summary: 'List archived workspaces owned by the current user' })
+  @ApiResponse({ status: 200, description: 'Array of archived workspaces' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  findArchivedWorkspaces(@CurrentUser() user: UserDocument) {
+    return this.workspacesService.findArchivedWorkspaces(user);
+  }
+
   @Get(':workspaceId')
   @ApiOperation({ summary: 'Get a single workspace by ID' })
   @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
@@ -91,6 +99,20 @@ export class WorkspacesController {
     @CurrentUser() user: UserDocument,
   ) {
     return this.workspacesService.archive(workspaceId, user);
+  }
+
+  @Patch(':workspaceId/restore')
+  @ApiOperation({ summary: 'Restore an archived workspace (owner only)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiResponse({ status: 200, description: 'Workspace restored' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Only the owner can restore this workspace' })
+  @ApiResponse({ status: 404, description: 'Archived workspace not found' })
+  restore(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.workspacesService.restore(workspaceId, user);
   }
 
   // ─── Members ────────────────────────────────────────────────────

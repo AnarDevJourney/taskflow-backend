@@ -378,8 +378,17 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 
 ## Remaining Work
 
-- ⬜ Frontend (React + TypeScript) — not started
-- ⬜ README.md run instructions — deferred until frontend exists, do not add unprompted
+- ⬜ README.md run instructions — deferred until the frontend is feature-complete, do not add unprompted
+
+## Workspaces Module Notes
+
+- Workspace archiving is soft-delete (`archivedAt`), owner-only, via `DELETE /workspaces/:workspaceId`.
+- `GET /workspaces/archived` and `PATCH /workspaces/:workspaceId/restore` (owner-only) support un-archiving — declared before `GET/PATCH :workspaceId` is fine here since `archived`/`restore` are distinct static segments, but note the general rule: any new static-path route under `/workspaces` must be declared **before** `:workspaceId`-based routes in the controller, or Nest will swallow it as a param match.
+- `findMyWorkspaces` intentionally returns the full `members` array (no `.select('-members')`) so the frontend can compute member counts and per-workspace ownership without an extra request.
+
+## Auth Module Notes
+
+- Invite re-use for existing accounts: `POST /auth/register` rejects with 409 if the invited email already has an account. For that case, `GET /auth/invite/:token` also returns `userExists: boolean`, and an authenticated user can call `POST /auth/accept-invite` (body: `{ token }`) to just be added to the workspace instead of registering again. Keep this path in mind whenever the invite/register flow changes — a removed member being re-invited must go through `accept-invite`, not `register`.
 
 ---
 

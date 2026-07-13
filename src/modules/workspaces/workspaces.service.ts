@@ -63,8 +63,19 @@ export class WorkspacesService {
         'members.userId': userId,
         archivedAt: null,
       })
-      .select('-members')
       .sort({ createdAt: -1 });
+  }
+
+  // ─── Get Archived Workspaces ─────────────────────────────────────
+  async findArchivedWorkspaces(user: UserDocument): Promise<WorkspaceDocument[]> {
+    const userId = user._id as Types.ObjectId;
+
+    return this.workspaceModel
+      .find({
+        ownerId: userId,
+        archivedAt: { $ne: null },
+      })
+      .sort({ archivedAt: -1 });
   }
 
   // ─── Get One ────────────────────────────────────────────────────
@@ -110,6 +121,25 @@ export class WorkspacesService {
 
     await this.workspaceModel.findByIdAndUpdate(workspace._id, {
       archivedAt: new Date(),
+    });
+  }
+
+  // ─── Restore Workspace ───────────────────────────────────────────
+  async restore(workspaceId: string, user: UserDocument): Promise<void> {
+    const workspace = await this.workspaceModel.findById(
+      toObjectId(workspaceId),
+    );
+
+    if (!workspace || !workspace.archivedAt) {
+      throw new NotFoundException('Archived workspace not found');
+    }
+
+    if (workspace.ownerId.toString() !== (user._id as Types.ObjectId).toString()) {
+      throw new ForbiddenException('Only the owner can restore this workspace');
+    }
+
+    await this.workspaceModel.findByIdAndUpdate(workspace._id, {
+      archivedAt: null,
     });
   }
 

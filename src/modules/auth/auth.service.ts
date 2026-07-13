@@ -9,7 +9,7 @@ import {
 import { SignOptions } from 'jsonwebtoken';
 import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
@@ -107,7 +107,59 @@ export class AuthService {
       );
     }
 
-    return { email: invite.email, role: invite.role };
+    const userExists = !!(await this.userModel.findOne({ email: invite.email }));
+
+    return { email: invite.email, role: invite.role, userExists };
+  }
+
+  // ─── Accept Invite (existing account) ────────────────────────────
+  // used when the invited email already has an account (e.g. a member
+  // was removed from a workspace and is being re-invited) — the user
+  // logs in with their existing credentials instead of registering,
+  // then this just adds them back as a workspace member
+  async acceptInvite(token: string, user: UserDocument) {
+    const invite = await this.inviteModel.findOne({ token });
+
+    if (!invite) {
+      throw new BadRequestException(
+        'Invite link is invalid or has already been used',
+      );
+    }
+
+    if (invite.expiresAt < new Date()) {
+      await this.inviteModel.deleteOne({ token });
+      throw new BadRequestException('Invite link has expired');
+    }
+
+    if (invite.email.toLowerCase() !== user.email.toLowerCase()) {
+      throw new BadRequestException(
+        'This invite was sent to a different email address',
+      );
+    }
+
+    const workspace = await this.workspaceModel.findById(invite.workspaceId);
+    if (!workspace) {
+      await this.inviteModel.deleteOne({ token });
+      throw new BadRequestException('Workspace no longer exists');
+    }
+
+    const alreadyMember = workspace.members.some(
+      (m) => m.userId.toString() === (user._id as Types.ObjectId).toString(),
+    );
+
+    if (!alreadyMember) {
+      await this.workspaceModel.findByIdAndUpdate(workspace._id, {
+        $push: {
+          members: { userId: user._id, role: invite.role, joinedAt: new Date() },
+        },
+      });
+    }
+
+    await this.inviteModel.deleteOne({ token });
+
+    this.logger.log(`${user.email} accepted invite to workspace ${workspace._id}`);
+
+    return { workspaceId: (workspace._id as Types.ObjectId).toString() };
   }
 
   // ─── Register ───────────────────────────────────────────────────

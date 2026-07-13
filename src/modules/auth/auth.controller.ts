@@ -21,6 +21,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/reset-password.dto';
 import { Public } from '@common/decorators/public.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -82,6 +83,21 @@ export class AuthController {
       await this.authService.register(dto);
     this.setTokenCookies(res, accessToken, refreshToken);
     return { user: this.sanitizeUser(user) };
+  }
+
+  // ─── Accept Invite ──────────────────────────────────────────────
+  @Post('accept-invite')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accept a workspace invite as an already-logged-in existing user' })
+  @ApiCookieAuth('cookie-access-token')
+  @ApiResponse({ status: 200, description: 'Added to the workspace' })
+  @ApiResponse({ status: 400, description: 'Invite invalid, expired, or for a different email' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  acceptInvite(
+    @Body() dto: AcceptInviteDto,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.authService.acceptInvite(dto.token, user);
   }
 
   // ─── Refresh ────────────────────────────────────────────────────
