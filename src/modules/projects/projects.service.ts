@@ -165,6 +165,46 @@ export class ProjectsService {
     });
   }
 
+  // ─── Get Archived Projects ───────────────────────────────────────
+  async findArchivedProjects(
+    workspaceId: string,
+    user: UserDocument,
+  ): Promise<ProjectDocument[]> {
+    const workspace = await this.workspacesService.findOne(workspaceId, user);
+
+    return this.projectModel
+      .find({
+        workspaceId: workspace._id,
+        archivedAt: { $ne: null },
+      })
+      .select('-members -statuses')
+      .sort({ archivedAt: -1 });
+  }
+
+  // ─── Restore ────────────────────────────────────────────────────
+  async restore(
+    workspaceId: string,
+    projectId: string,
+    user: UserDocument,
+  ): Promise<void> {
+    const workspace = await this.workspacesService.findOne(workspaceId, user);
+
+    const project = await this.projectModel.findOne({
+      _id: toObjectId(projectId),
+      workspaceId: workspace._id,
+    });
+
+    if (!project || !project.archivedAt) {
+      throw new NotFoundException('Archived project not found');
+    }
+
+    this.assertProjectRole(project, workspace, user, [WorkspaceRole.OWNER]);
+
+    await this.projectModel.findByIdAndUpdate(project._id, {
+      archivedAt: null,
+    });
+  }
+
   // ─── Get Members ────────────────────────────────────────────────
   async getMembers(workspaceId: string, projectId: string, user: UserDocument) {
     const project = await this.findOne(workspaceId, projectId, user);

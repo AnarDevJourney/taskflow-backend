@@ -62,6 +62,20 @@ export class ProjectsController {
     return this.projectsService.findAll(workspaceId, user);
   }
 
+  @Get('archived')
+  @ApiOperation({ summary: 'List archived projects in a workspace' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiResponse({ status: 200, description: 'Array of archived projects' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a member of this workspace' })
+  @ApiResponse({ status: 404, description: 'Workspace not found' })
+  findArchived(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.projectsService.findArchivedProjects(workspaceId, user);
+  }
+
   @Get(':projectId')
   @ApiOperation({ summary: 'Get a single project by ID' })
   @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
@@ -132,6 +146,22 @@ export class ProjectsController {
     @CurrentUser() user: UserDocument,
   ) {
     return this.projectsService.archive(workspaceId, projectId, user);
+  }
+
+  @Patch(':projectId/restore')
+  @ApiOperation({ summary: 'Restore an archived project (owner only)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiResponse({ status: 200, description: 'Project restored' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Only the project owner can restore' })
+  @ApiResponse({ status: 404, description: 'Archived project not found' })
+  restore(
+    @Param('workspaceId') workspaceId: string,
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.projectsService.restore(workspaceId, projectId, user);
   }
 
   // ─── Members ────────────────────────────────────────────────────
