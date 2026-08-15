@@ -19,7 +19,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node -r tsconfig-paths/register src/database/seed.ts",
-    "seed:docker": "SEED_ENV=docker ts-node -r tsconfig-paths/register src/database/seed.ts"
+    "seed:docker": "SEED_ENV=docker ts-node -r tsconfig-paths/register src/database/seed.ts",
+    "migrate:normalize-order": "ts-node -r tsconfig-paths/register src/database/migrations/normalize-task-order.ts",
+    "migrate:normalize-order:docker": "MIGRATE_ENV=docker ts-node -r tsconfig-paths/register src/database/migrations/normalize-task-order.ts"
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",

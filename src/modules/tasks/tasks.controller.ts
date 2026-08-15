@@ -24,6 +24,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { BulkUpdateTasksDto } from './dto/bulk-update-tasks.dto';
 import { ReorderTaskDto } from './dto/reorder-task.dto';
+import { ReorderBulkTasksDto } from './dto/reorder-bulk-tasks.dto';
 import { QueryTasksDto } from './dto/query-tasks.dto';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { UserDocument } from '@modules/users/schemas/user.schema';
@@ -90,6 +91,26 @@ export class TasksController {
     @CurrentUser() user: UserDocument,
   ) {
     return this.tasksService.findOne(workspaceId, projectId, taskId, user);
+  }
+
+  // NOTE: must be registered before `:taskId`-based PATCH routes below, or
+  // Nest will swallow 'reorder-bulk' as a :taskId param match.
+  @Patch('reorder-bulk')
+  @ApiOperation({ summary: 'Move multiple tasks to a new position/column at once (multi-select drag-and-drop)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'projectId', description: 'MongoDB ObjectId of the project' })
+  @ApiResponse({ status: 200, description: 'Returns count of updated tasks' })
+  @ApiResponse({ status: 400, description: 'Invalid target status' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'No matching tasks found' })
+  reorderBulk(
+    @Param('workspaceId') workspaceId: string,
+    @Param('projectId') projectId: string,
+    @Body() dto: ReorderBulkTasksDto,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.tasksService.reorderBulk(workspaceId, projectId, dto, user);
   }
 
   @Patch(':taskId')

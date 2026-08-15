@@ -14,6 +14,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { BulkUpdateTasksDto } from './dto/bulk-update-tasks.dto';
 import { ReorderTaskDto } from './dto/reorder-task.dto';
+import { ReorderBulkTasksDto } from './dto/reorder-bulk-tasks.dto';
 import { WorkspaceRole } from '@modules/workspaces/enums/workspace-role.enum';
 import { Priority } from './enums/priority.enum';
 import { toObjectId } from '@common/utils/object-id';
@@ -277,22 +278,153 @@ export class TasksService {
 
     const oldStatus = task.status;
     const newStatus = dto.status ?? oldStatus;
+    const oldOrder = task.order;
+    const newOrder = dto.order;
 
-    // shift other tasks to make room at the new position
-    await this.taskModel.updateMany(
-      {
-        projectId: task.projectId,
-        status: newStatus,
-        order: { $gte: dto.order },
-        _id: { $ne: task._id },
-        archivedAt: null,
-      },
-      { $inc: { order: 1 } },
-    );
+    if (oldStatus === newStatus) {
+      // Same-column reorder — only shift the tasks strictly between the old
+      // and new position, closing the gap the moved task leaves behind.
+      if (newOrder > oldOrder) {
+        // moving down: tasks between (oldOrder, newOrder] shift up by one
+        await this.taskModel.updateMany(
+          {
+            projectId: task.projectId,
+            status: newStatus,
+            order: { $gt: oldOrder, $lte: newOrder },
+            _id: { $ne: task._id },
+            archivedAt: null,
+          },
+          { $inc: { order: -1 } },
+        );
+      } else if (newOrder < oldOrder) {
+        // moving up: tasks between [newOrder, oldOrder) shift down by one
+        await this.taskModel.updateMany(
+          {
+            projectId: task.projectId,
+            status: newStatus,
+            order: { $gte: newOrder, $lt: oldOrder },
+            _id: { $ne: task._id },
+            archivedAt: null,
+          },
+          { $inc: { order: 1 } },
+        );
+      }
+    } else {
+      // Cross-column move — close the gap left in the old column…
+      await this.taskModel.updateMany(
+        {
+          projectId: task.projectId,
+          status: oldStatus,
+          order: { $gt: oldOrder },
+          _id: { $ne: task._id },
+          archivedAt: null,
+        },
+        { $inc: { order: -1 } },
+      );
+      // …and make room at the target position in the new column.
+      await this.taskModel.updateMany(
+        {
+          projectId: task.projectId,
+          status: newStatus,
+          order: { $gte: newOrder },
+          _id: { $ne: task._id },
+          archivedAt: null,
+        },
+        { $inc: { order: 1 } },
+      );
+    }
 
     task.status = newStatus;
-    task.order = dto.order;
+    task.order = newOrder;
     return task.save();
+  }
+
+  // ─── Reorder multiple tasks at once (multi-select drag & drop) ───
+  async reorderBulk(
+    workspaceId: string,
+    projectId: string,
+    dto: ReorderBulkTasksDto,
+    user: UserDocument,
+  ): Promise<{ updated: number }> {
+    const project = await this.projectsService.findOne(
+      workspaceId,
+      projectId,
+      user,
+    );
+
+    this.assertValidStatus(project, dto.status);
+
+    const movedIds = dto.taskIds.map((id) => toObjectId(id));
+
+    const movedTasks = await this.taskModel.find({
+      _id: { $in: movedIds },
+      projectId: project._id,
+      archivedAt: null,
+    });
+
+    if (movedTasks.length === 0) {
+      throw new NotFoundException('No matching tasks found');
+    }
+
+    // Preserve the relative order the caller asked for (dto.taskIds), not
+    // whatever order MongoDB happened to return them in.
+    const movedById = new Map(
+      movedTasks.map((t) => [(t._id as Types.ObjectId).toString(), t]),
+    );
+    const orderedMoved: TaskDocument[] = [];
+    for (const id of dto.taskIds) {
+      const found = movedById.get(id);
+      if (found) orderedMoved.push(found);
+    }
+    const movedIdSet = new Set(
+      orderedMoved.map((t) => (t._id as Types.ObjectId).toString()),
+    );
+
+    // Every column touched by this move: each moved task's original column,
+    // plus the target column. Recomputing each one from scratch (rather than
+    // incrementally shifting) keeps this correct regardless of how many
+    // tasks move at once or where they came from.
+    const affectedStatuses = new Set<string>([
+      dto.status,
+      ...orderedMoved.map((t) => t.status),
+    ]);
+
+    const bulkOps: Parameters<typeof this.taskModel.bulkWrite>[0] = [];
+
+    for (const status of affectedStatuses) {
+      const remaining = await this.taskModel
+        .find({
+          projectId: project._id,
+          status,
+          archivedAt: null,
+          _id: { $nin: [...movedIdSet] },
+        })
+        .sort({ order: 1 })
+        .select('_id');
+
+      const finalOrder: Types.ObjectId[] =
+        status === dto.status
+          ? [
+              ...remaining.slice(0, dto.order).map((t) => t._id as Types.ObjectId),
+              ...orderedMoved.map((t) => t._id as Types.ObjectId),
+              ...remaining.slice(dto.order).map((t) => t._id as Types.ObjectId),
+            ]
+          : remaining.map((t) => t._id as Types.ObjectId);
+
+      finalOrder.forEach((id, index) => {
+        const update: Record<string, unknown> = { order: index };
+        if (status === dto.status) update.status = dto.status;
+        bulkOps.push({
+          updateOne: { filter: { _id: id }, update: { $set: update } },
+        });
+      });
+    }
+
+    if (bulkOps.length > 0) {
+      await this.taskModel.bulkWrite(bulkOps);
+    }
+
+    return { updated: orderedMoved.length };
   }
 
   // ─── Delete (soft) ───────────────────────────────────────────────
