@@ -44,7 +44,8 @@ src/
     ├── activity/         # audit log (immutable)
     ├── notifications/    # in-app + email notifications
     ├── files/            # MinIO upload/download
-    └── search/           # full-text search
+    ├── search/           # full-text search
+    └── table-settings/   # per-user saved table preferences (view style, page size, column visibility/order), keyed by a `key` string per table (e.g. "myTasks")
 
 scripts/                  # bash scripts for running the project (see Docker section)
 ├── dev.sh
@@ -365,6 +366,7 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Notifications (in-app + email + WebSocket push + integrated into tasks, comments & auth)
 - ✅ Files (MinIO upload/download)
 - ✅ Search (full-text search)
+- ✅ Table Settings (per-user saved table view/page-size/column preferences, one doc per user+key)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 - ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
 
@@ -389,6 +391,18 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 ## Auth Module Notes
 
 - Invite re-use for existing accounts: `POST /auth/register` rejects with 409 if the invited email already has an account. For that case, `GET /auth/invite/:token` also returns `userExists: boolean`, and an authenticated user can call `POST /auth/accept-invite` (body: `{ token }`) to just be added to the workspace instead of registering again. Keep this path in mind whenever the invite/register flow changes — a removed member being re-invited must go through `accept-invite`, not `register`.
+
+## Tasks Module Notes
+
+- `GET /workspaces/:workspaceId/my-tasks` (`my-tasks.controller.ts`) lists the current user's tasks **across every project in the workspace**, paginated — separate from the per-project `GET /workspaces/:workspaceId/projects/:projectId/tasks`. It queries `TasksQueryService.findMyTasks()` directly by the `{ workspaceId, assigneeId }` compound index on `Task` rather than looking up projects first, so it stays a single query regardless of how many projects the workspace has.
+- Its `status` filter is a case-insensitive partial match (`$regex`, escaped), not exact — project status columns aren't a fixed enum, so an exact match would be unusable when filtering across projects with different column names.
+
+## Table Settings Module Notes
+
+- One document per `{ userId, key }` pair (unique index) — `key` is an arbitrary string identifying which table the settings belong to (currently only `"myTasks"` is used by the frontend). Reuse the same collection for future customizable tables rather than adding a new one.
+- `PUT /table-settings/:key` is an upsert (`findOneAndUpdate` with `upsert: true`) — the frontend calls it on every preference change (view style, page size, column visibility/order), so there is no separate create endpoint.
+- `columns` is stored as an ordered array of `{ id, visible, width }` — array order **is** the display order the frontend renders columns in; there's no separate `order` field. `width` is the saved pixel width from the frontend's column-resize mode; `null`/omitted means "use that view's default width".
+- The `TableColumnSetting` subdocument schema field is named `columnId`, not `id` — see the NOTE comment on it in `schemas/table-settings.schema.ts`. Mongoose subdocuments auto-add a virtual `id` getter/setter derived from `_id`; a real path also named `id` collides with it and silently never persists (only an auto-generated `_id` survives). `TableSettingsService.toResponse()` maps `columnId` back to `id` at the API boundary so the wire format is unaffected — if you add more subdocument fields here, avoid `id` as a name for the same reason.
 
 ---
 

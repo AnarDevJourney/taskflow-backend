@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { TasksController } from './tasks.controller';
+import { MyTasksController } from './my-tasks.controller';
 import { TasksService } from './tasks.service';
 import { TasksQueryService } from './tasks-query.service';
 import { Task, TaskSchema } from './schemas/task.schema';
@@ -17,7 +18,7 @@ import { NotificationsModule } from '@modules/notifications/notifications.module
     ActivityModule,
     NotificationsModule,
   ],
-  controllers: [TasksController],
+  controllers: [TasksController, MyTasksController],
   providers: [TasksService, TasksQueryService],
   exports: [TasksService], // CommentsModule and SprintsModule will need this
 })

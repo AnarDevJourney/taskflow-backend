@@ -14,6 +14,7 @@ import { ActivityModule } from './modules/activity/activity.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FilesModule } from './modules/files/files.module';
 import { SearchModule } from './modules/search/search.module';
+import { TableSettingsModule } from './modules/table-settings/table-settings.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { throttlerConfig } from './config/throttler.config';
@@ -34,6 +35,7 @@ import { throttlerConfig } from './config/throttler.config';
     NotificationsModule,
     FilesModule,
     SearchModule,
+    TableSettingsModule,
   ],
   controllers: [AppController],
   providers: [
