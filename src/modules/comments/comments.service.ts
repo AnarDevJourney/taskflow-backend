@@ -185,7 +185,7 @@ export class CommentsService {
     return comment.populate('authorId', 'name email avatarUrl');
   }
 
-  // ─── Delete (soft) ───────────────────────────────────────────────
+  // ─── Delete (hard) ───────────────────────────────────────────────
   async remove(
     workspaceId: string,
     projectId: string,
@@ -195,10 +195,7 @@ export class CommentsService {
   ): Promise<void> {
     const comment = await this.findOneAndAssertAuthor(commentId, taskId, user);
 
-    comment.deletedAt = new Date();
-    comment.body = '[deleted]'; // wipe content but keep thread structure
-    comment.mentions = [];
-    await comment.save();
+    await comment.deleteOne();
 
     await this.activityService.log({
       taskId: comment.taskId,
