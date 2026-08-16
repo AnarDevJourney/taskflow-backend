@@ -45,7 +45,8 @@ src/
     ├── notifications/    # in-app + email notifications
     ├── files/            # MinIO upload/download
     ├── search/           # full-text search
-    └── table-settings/   # per-user saved table preferences (view style, page size, column visibility/order), keyed by a `key` string per table (e.g. "myTasks")
+    ├── table-settings/   # per-user saved table preferences (view style, page size, column visibility/order), keyed by a `key` string per table (e.g. "myTasks")
+    └── sidebar-settings/ # per-user saved sidebar preferences (nav module visibility/order, collapsed state) — one doc per user, singular Get/Put (no `key`)
 
 scripts/                  # bash scripts for running the project (see Docker section)
 ├── dev.sh
@@ -367,6 +368,7 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Files (MinIO upload/download)
 - ✅ Search (full-text search)
 - ✅ Table Settings (per-user saved table view/page-size/column preferences, one doc per user+key)
+- ✅ Sidebar Settings (per-user saved sidebar nav module visibility/order + collapsed state, one doc per user)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 - ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
 
@@ -403,6 +405,13 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 - `PUT /table-settings/:key` is an upsert (`findOneAndUpdate` with `upsert: true`) — the frontend calls it on every preference change (view style, page size, column visibility/order), so there is no separate create endpoint.
 - `columns` is stored as an ordered array of `{ id, visible, width }` — array order **is** the display order the frontend renders columns in; there's no separate `order` field. `width` is the saved pixel width from the frontend's column-resize mode; `null`/omitted means "use that view's default width".
 - The `TableColumnSetting` subdocument schema field is named `columnId`, not `id` — see the NOTE comment on it in `schemas/table-settings.schema.ts`. Mongoose subdocuments auto-add a virtual `id` getter/setter derived from `_id`; a real path also named `id` collides with it and silently never persists (only an auto-generated `_id` survives). `TableSettingsService.toResponse()` maps `columnId` back to `id` at the API boundary so the wire format is unaffected — if you add more subdocument fields here, avoid `id` as a name for the same reason.
+
+## Sidebar Settings Module Notes
+
+- One document per `userId` (unique index, singular resource) — unlike Table Settings there's no `key`, since there's only one sidebar. `GET/PUT /sidebar-settings` (no path param), scoped to `CurrentUser()`.
+- `modules` is stored the same way as `table-settings.columns`: an ordered array of `{ id, visible }`, array order **is** the sidebar's render order. The subdocument field is `moduleId`, not `id` — same Mongoose virtual-`id` collision as `TableColumnSetting` (see above), avoided the same way (`@Schema({ id: false })` + boundary mapping in `SidebarSettingsService.toResponse()`).
+- `collapsed` is a plain boolean on the top-level document, saved immediately on toggle (not batched — there's nothing to batch for a single flag).
+- Frontend merges saved `modules` with a hardcoded default list (`normalizeSidebarModules` in `AppLayout.tsx`) so a module added to the app after a user already saved settings still appears, appended at the end.
 
 ---
 
