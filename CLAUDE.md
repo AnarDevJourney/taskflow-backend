@@ -17,6 +17,7 @@ REST API with JWT authentication (HttpOnly cookies), WebSockets for real-time up
 - **File storage**: MinIO (S3-compatible)
 - **Email**: Nodemailer + Handlebars templates
 - **Validation**: class-validator + class-transformer
+- **User-Agent parsing**: ua-parser-js (Activity Log's `browser`/`os`/`device` fields)
 - **Containerization**: Docker + Docker Compose (dev and prod modes)
 
 ---
@@ -32,6 +33,8 @@ src/
 │   ├── guards/           # JwtAuthGuard, RolesGuard
 │   ├── filters/          # HttpExceptionFilter (global)
 │   ├── interceptors/     # TransformInterceptor, LoggingInterceptor
+│   ├── middleware/       # RequestContextMiddleware (global, captures IP + User-Agent per request)
+│   ├── context/          # request-context.ts — AsyncLocalStorage store read by ActivityService.log()
 │   └── utils/            # pagination, object-id, slug helpers
 └── modules/
     ├── auth/             # login, register, invite, refresh, reset password
@@ -369,6 +372,7 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Search (full-text search)
 - ✅ Table Settings (per-user saved table view/page-size/column preferences, one doc per user+key)
 - ✅ Sidebar Settings (per-user saved sidebar nav module visibility/order + collapsed state, one doc per user)
+- ✅ Workspace Activity Log endpoint (`GET /workspaces/:workspaceId/activity`, filterable by user/module/action/date-range — powers the frontend's Activity Log page)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 - ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
 
@@ -401,10 +405,21 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 
 ## Table Settings Module Notes
 
-- One document per `{ userId, key }` pair (unique index) — `key` is an arbitrary string identifying which table the settings belong to (currently only `"myTasks"` is used by the frontend). Reuse the same collection for future customizable tables rather than adding a new one.
+- One document per `{ userId, key }` pair (unique index) — `key` is an arbitrary string identifying which table the settings belong to. Two in use so far: `"myTasks"` and `"activityLog"`. Reuse the same collection for future customizable tables (a new `key`) rather than adding a new one — this is exactly what it's for.
 - `PUT /table-settings/:key` is an upsert (`findOneAndUpdate` with `upsert: true`) — the frontend calls it on every preference change (view style, page size, column visibility/order), so there is no separate create endpoint.
 - `columns` is stored as an ordered array of `{ id, visible, width }` — array order **is** the display order the frontend renders columns in; there's no separate `order` field. `width` is the saved pixel width from the frontend's column-resize mode; `null`/omitted means "use that view's default width".
 - The `TableColumnSetting` subdocument schema field is named `columnId`, not `id` — see the NOTE comment on it in `schemas/table-settings.schema.ts`. Mongoose subdocuments auto-add a virtual `id` getter/setter derived from `_id`; a real path also named `id` collides with it and silently never persists (only an auto-generated `_id` survives). `TableSettingsService.toResponse()` maps `columnId` back to `id` at the API boundary so the wire format is unaffected — if you add more subdocument fields here, avoid `id` as a name for the same reason.
+
+## Activity Module Notes (workspace-wide feed)
+
+- `WorkspaceActivityController` (`workspace-activity.controller.ts`) is separate from `ActivityController` — same `ActivityService`/`ActivityLog` schema, different base path (`workspaces/:workspaceId/activity`, not nested under a project/task) and a different query shape (`ActivityService.findByWorkspace()`).
+- `ActivityLog` has a real, stored `module` field (enum, `ACTIVITY_MODULES` from `activity/utils/activity-module.util.ts` — 6 buckets: `task`, `comments`, `attachments`, `sprint`, `checklist`, `watchers`). It's set once at write time by `ActivityService.log()` via `getActivityModule(params.action)` — callers never pass it explicitly, so every existing `activityService.log({...})` call site kept working unmodified. Filtering by `module` in `findByWorkspace()` is therefore a plain indexed equality match (`{ workspaceId, module, createdAt: -1 }` index), not an `action: { $in: [...] }` expansion; if both `module` and `action` query params are given, both filters apply (AND). The frontend just reads `log.module` straight off the response now (it used to derive it client-side from `action` — that fallback logic still exists in `features/activity/utils/activityMeta.ts` but is unused for this) — keep the backend util's grouping in sync when adding a new `ActivityAction`, or the schema's `enum: ACTIVITY_MODULES` will reject writes for it.
+- `findByWorkspace()` also populates `taskId` (title only) and `projectId` (name only) alongside the usual `actorId` (name/email/avatarUrl), so the frontend table/drawer can show context without extra requests.
+- No `LOGIN`/`RESTORE` actions exist in the backend enum yet — the frontend's action→color/icon category mapping (create/update/delete/restore/login) still defines buckets for them since the reference design called for 5 categories; they're just currently unreachable until a login-activity or restore-activity is logged somewhere.
+- `ActivityLog` also stores request metadata captured at write time: `ip`, `browser`, `os`, `device` (all nullable strings). Populated by `ActivityService.log()` from two sources — see `common/context/request-context.ts` and `common/middleware/request-context.middleware.ts`:
+  - `RequestContextMiddleware` is registered globally (`AppModule.configure()`, `forRoutes('*')`) and stashes each request's IP (`X-Forwarded-For`'s first hop, falling back to `req.ip`) and raw `User-Agent` header into an `AsyncLocalStorage` (`requestContext`) for the duration of that request's async context.
+  - `ActivityService.log()` reads `requestContext.get()` and parses the User-Agent with `ua-parser-js` (`UAParser(userAgent)`) into separate `browser`/`os`/`device` strings via private `formatBrowser`/`formatOs`/`formatDevice` helpers — this is why call sites never had to change to pass this data explicitly, same as `module`.
+  - All four fields are `null` if activity is ever logged outside an HTTP request (no current caller does this, but nothing enforces it can't happen) or if the middleware didn't run for some reason.
 
 ## Sidebar Settings Module Notes
 

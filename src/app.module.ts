@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
+import { RequestContextMiddleware } from '@common/middleware/request-context.middleware';
 import { AppService } from './app.service';
 import { AppConfigModule } from '@config/config.module';
 import { DatabaseModule } from '@database/database.module';
@@ -48,4 +49,10 @@ import { throttlerConfig } from './config/throttler.config';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // populates requestContext (IP + User-Agent) for every request, read
+    // later by ActivityService.log() — see request-context.ts
+    consumer.apply(RequestContextMiddleware).forRoutes('*');
+  }
+}

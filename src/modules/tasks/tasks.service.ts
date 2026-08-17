@@ -146,7 +146,18 @@ export class TasksService {
     // capture old values before mutation
     const oldStatus = task.status;
     const oldPriority = task.priority;
-    const oldAssigneeId = task.assigneeId?.toString() ?? null;
+    // task.assigneeId is populated by findOne() above (name/email/avatarUrl,
+    // for the response), so it's a User document here, not a bare
+    // ObjectId — `.toString()` on it would NOT give back the id (it falls
+    // through to Object.prototype.toString → "[object Object]"), silently
+    // breaking every `!== oldAssigneeId` comparison below. Read `._id` off
+    // the populated doc first; fall back to `.toString()` for the
+    // never-populated case (kept in case this method's populate ever
+    // changes).
+    const oldAssigneeId =
+      (task.assigneeId as unknown as { _id?: Types.ObjectId })?._id?.toString() ??
+      task.assigneeId?.toString() ??
+      null;
     const oldDueDate = task.dueDate?.toISOString() ?? null;
     const oldSprintId = task.sprintId?.toString() ?? null;
 
@@ -196,7 +207,14 @@ export class TasksService {
       });
     }
 
-    if (dto.assigneeId !== undefined) {
+    // dto.assigneeId can arrive unchanged — the frontend saves the whole
+    // right panel in one batched request even if the user only edited one
+    // field (see TaskDetailModal's Save/Cancel pattern) — so only log (and
+    // notify) when the value actually moved, same as status/priority above
+    if (
+      dto.assigneeId !== undefined &&
+      (dto.assigneeId ?? null) !== oldAssigneeId
+    ) {
       await this.activityService.log({
         taskId: task._id,
         projectId: task.projectId,
@@ -227,7 +245,11 @@ export class TasksService {
       }
     }
 
-    if (dto.dueDate !== undefined) {
+    // compare as timestamps, not raw strings — `dto.dueDate` and
+    // `oldDueDate` can be equivalent instants in different string formats
+    const newDueDateTime = dto.dueDate ? new Date(dto.dueDate).getTime() : null;
+    const oldDueDateTime = oldDueDate ? new Date(oldDueDate).getTime() : null;
+    if (dto.dueDate !== undefined && newDueDateTime !== oldDueDateTime) {
       await this.activityService.log({
         taskId: task._id,
         projectId: task.projectId,
@@ -240,7 +262,10 @@ export class TasksService {
       });
     }
 
-    if (dto.sprintId !== undefined) {
+    if (
+      dto.sprintId !== undefined &&
+      (dto.sprintId ?? null) !== oldSprintId
+    ) {
       await this.activityService.log({
         taskId: task._id,
         projectId: task.projectId,
@@ -336,7 +361,24 @@ export class TasksService {
 
     task.status = newStatus;
     task.order = newOrder;
-    return task.save();
+    const saved = await task.save();
+
+    // cross-column drag is a status change too — same as PATCHing `status`
+    // via update(), just triggered by drag & drop instead of the modal
+    if (oldStatus !== newStatus) {
+      await this.activityService.log({
+        taskId: task._id,
+        projectId: task.projectId,
+        workspaceId: task.workspaceId,
+        actorId: user._id,
+        action: ActivityAction.STATUS_CHANGED,
+        field: 'status',
+        oldValue: oldStatus,
+        newValue: newStatus,
+      });
+    }
+
+    return saved;
   }
 
   // ─── Reorder multiple tasks at once (multi-select drag & drop) ───
@@ -422,6 +464,22 @@ export class TasksService {
 
     if (bulkOps.length > 0) {
       await this.taskModel.bulkWrite(bulkOps);
+    }
+
+    // same status-change logging as the single-task reorder() and
+    // update() — only for tasks that actually crossed columns
+    for (const task of orderedMoved) {
+      if (task.status === dto.status) continue;
+      await this.activityService.log({
+        taskId: task._id,
+        projectId: project._id,
+        workspaceId: project.workspaceId,
+        actorId: user._id,
+        action: ActivityAction.STATUS_CHANGED,
+        field: 'status',
+        oldValue: task.status,
+        newValue: dto.status,
+      });
     }
 
     return { updated: orderedMoved.length };

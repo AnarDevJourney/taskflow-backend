@@ -165,6 +165,7 @@ export class CommentsService {
   ): Promise<CommentDocument> {
     const comment = await this.findOneAndAssertAuthor(commentId, taskId, user);
 
+    const oldBody = comment.body;
     const mentions = this.parseMentions(dto.body);
 
     comment.body = dto.body;
@@ -179,6 +180,9 @@ export class CommentsService {
       workspaceId: comment.workspaceId,
       actorId: user._id,
       action: ActivityAction.COMMENT_EDITED,
+      field: 'body',
+      oldValue: oldBody.substring(0, 100),
+      newValue: dto.body.substring(0, 100),
       meta: dto.body.substring(0, 100),
     });
 
