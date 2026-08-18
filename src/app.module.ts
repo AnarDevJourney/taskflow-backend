@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AppConfigModule } from '@config/config.module';
 import { DatabaseModule } from '@database/database.module';
 import { RedisModule } from '@common/redis/redis.module';
+import { QueueModule } from '@common/queue/queue.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
 import { ProjectsModule } from '@modules/projects/projects.module';
@@ -27,6 +28,7 @@ import { throttlerConfig } from './config/throttler.config';
     AppConfigModule,
     DatabaseModule,
     RedisModule,
+    QueueModule,
     AuthModule,
     WorkspacesModule,
     ProjectsModule,

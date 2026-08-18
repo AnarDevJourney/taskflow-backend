@@ -21,7 +21,7 @@ import { toObjectId } from '@common/utils/object-id';
 import { ActivityService } from '@modules/activity/activity.service';
 import { ActivityAction } from '@modules/activity/enums/activity-action.enum';
 import { NotificationsService } from '@modules/notifications/notifications.service';
-import { AppConfigService } from '@config/config.service';
+import { taskLink } from '@modules/notifications/notification-links';
 
 @Injectable()
 export class TasksService {
@@ -31,7 +31,6 @@ export class TasksService {
     private workspacesService: WorkspacesService,
     private activityService: ActivityService,
     private notificationsService: NotificationsService,
-    private config: AppConfigService,
   ) {}
 
   // ─── Create ─────────────────────────────────────────────────────
@@ -90,6 +89,24 @@ export class TasksService {
       action: ActivityAction.TASK_CREATED,
       meta: task.title,
     });
+
+    // a task can be created already assigned — the assignee gets the same
+    // notification they would get from a later assignment (notify() drops
+    // the actor, so assigning to yourself stays silent)
+    if (task.assigneeId) {
+      const taskId = (task._id as Types.ObjectId).toString();
+      await this.notificationsService.notifyTaskAssigned({
+        recipientId: task.assigneeId.toString(),
+        actorId: userId.toString(),
+        actorName: user.name,
+        taskId,
+        taskKey: `${project.key}-${task.taskNumber}`,
+        taskTitle: task.title,
+        projectId: task.projectId.toString(),
+        workspaceId: task.workspaceId.toString(),
+        taskUrl: taskLink(workspaceId, projectId, taskId),
+      });
+    }
 
     return task;
   }
@@ -161,6 +178,10 @@ export class TasksService {
     const oldDueDate = task.dueDate?.toISOString() ?? null;
     const oldSprintId = task.sprintId?.toString() ?? null;
 
+    // everyone with a stake in this task, captured before Object.assign()
+    // below overwrites the populated fields with raw ObjectIds
+    const audience = this.collectAudience(task);
+
     // convert string IDs to ObjectIds where needed
     const updateData: any = { ...dto };
 
@@ -191,6 +212,21 @@ export class TasksService {
         field: 'status',
         oldValue: oldStatus,
         newValue: dto.status,
+      });
+
+      const taskIdStr = (task._id as Types.ObjectId).toString();
+      await this.notificationsService.notifyTaskStatusChanged({
+        recipientIds: audience,
+        actorId: (user._id as Types.ObjectId).toString(),
+        actorName: user.name,
+        taskId: taskIdStr,
+        taskKey: `${project.key}-${task.taskNumber}`,
+        taskTitle: task.title,
+        projectId: task.projectId.toString(),
+        workspaceId: task.workspaceId.toString(),
+        oldStatus,
+        newStatus: dto.status,
+        taskUrl: taskLink(workspaceId, projectId, taskIdStr),
       });
     }
 
@@ -227,20 +263,18 @@ export class TasksService {
       });
 
       const actorId = (user._id as Types.ObjectId).toString();
-      if (dto.assigneeId && dto.assigneeId !== actorId) {
-        const taskKey = `${project.key}-${task.taskNumber}`;
-        const taskUrl = `${this.config.appUrl}/w/${workspaceId}/p/${projectId}/tasks/${taskId}`;
+      // no actor check — assigning a task to yourself notifies you too
+      if (dto.assigneeId) {
         await this.notificationsService.notifyTaskAssigned({
           recipientId: dto.assigneeId,
           actorId,
           actorName: user.name,
           taskId: (task._id as Types.ObjectId).toString(),
-          taskKey,
+          taskKey: `${project.key}-${task.taskNumber}`,
           taskTitle: task.title,
           projectId: task.projectId.toString(),
-          projectName: project.name,
           workspaceId: task.workspaceId.toString(),
-          taskUrl,
+          taskUrl: taskLink(workspaceId, projectId, taskId),
         });
       }
     }
@@ -675,6 +709,23 @@ export class TasksService {
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────
+  // watchers + reporter + assignee, as plain id strings. findOne() populates
+  // all three, so each entry can be either a User document or a bare
+  // ObjectId depending on where the task came from.
+  private collectAudience(task: TaskDocument): string[] {
+    const ids = [
+      ...task.watchers,
+      task.reporterId,
+      task.assigneeId,
+    ] as unknown as ({ _id?: Types.ObjectId } | Types.ObjectId | null)[];
+
+    return ids
+      .filter((id): id is NonNullable<typeof id> => id != null)
+      .map((id) =>
+        ((id as { _id?: Types.ObjectId })._id ?? id).toString(),
+      );
+  }
+
   private assertValidStatus(project: any, status: string): void {
     const validStatuses = project.statuses.map((s: any) => s.name);
     if (!validStatuses.includes(status)) {

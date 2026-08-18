@@ -18,6 +18,8 @@ import {
 } from './dto/complete-sprint.dto';
 import { WorkspaceRole } from '@modules/workspaces/enums/workspace-role.enum';
 import { toObjectId } from '@common/utils/object-id';
+import { NotificationsService } from '@modules/notifications/notifications.service';
+import { sprintsLink } from '@modules/notifications/notification-links';
 
 @Injectable()
 export class SprintsService {
@@ -26,6 +28,7 @@ export class SprintsService {
     @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
     private projectsService: ProjectsService,
     private workspacesService: WorkspacesService,
+    private notificationsService: NotificationsService,
   ) {}
 
   // ─── Create ─────────────────────────────────────────────────────
@@ -162,7 +165,26 @@ export class SprintsService {
     }
 
     sprint.status = SprintStatus.ACTIVE;
-    return sprint.save();
+    const started = await sprint.save();
+
+    const project = await this.projectsService.findOne(
+      workspaceId,
+      projectId,
+      user,
+    );
+
+    await this.notificationsService.notifySprintStarted({
+      recipientIds: project.members.map((m) => m.userId.toString()),
+      actorId: (user._id as Types.ObjectId).toString(),
+      actorName: user.name,
+      sprintName: sprint.name,
+      projectId,
+      projectName: project.name,
+      workspaceId,
+      sprintUrl: sprintsLink(workspaceId, projectId),
+    });
+
+    return started;
   }
 
   // ─── Complete Sprint ─────────────────────────────────────────────
@@ -242,7 +264,22 @@ export class SprintsService {
     sprint.totalPoints = totalPoints;
     sprint.completedPoints = completedPoints;
 
-    return sprint.save();
+    const completed = await sprint.save();
+
+    await this.notificationsService.notifySprintCompleted({
+      recipientIds: project.members.map((m) => m.userId.toString()),
+      actorId: (user._id as Types.ObjectId).toString(),
+      actorName: user.name,
+      sprintName: sprint.name,
+      projectId,
+      projectName: project.name,
+      workspaceId,
+      completedPoints,
+      totalPoints,
+      sprintUrl: sprintsLink(workspaceId, projectId),
+    });
+
+    return completed;
   }
 
   // ─── Delete ──────────────────────────────────────────────────────

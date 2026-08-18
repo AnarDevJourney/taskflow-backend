@@ -19,8 +19,8 @@ import {
 import { ActivityService } from '@modules/activity/activity.service';
 import { ActivityAction } from '@modules/activity/enums/activity-action.enum';
 import { NotificationsService } from '@modules/notifications/notifications.service';
+import { taskLink } from '@modules/notifications/notification-links';
 import { ProjectsService } from '@modules/projects/projects.service';
-import { AppConfigService } from '@config/config.service';
 
 @Injectable()
 export class CommentsService {
@@ -30,7 +30,6 @@ export class CommentsService {
     private activityService: ActivityService,
     private notificationsService: NotificationsService,
     private projectsService: ProjectsService,
-    private config: AppConfigService,
   ) {}
 
   // ─── Create ─────────────────────────────────────────────────────
@@ -78,7 +77,7 @@ export class CommentsService {
     const actorId = userId.toString();
     const snippet = dto.body.substring(0, 100);
     const taskKey = `${project.key}-${task.taskNumber}`;
-    const taskUrl = `${this.config.appUrl}/w/${workspaceId}/p/${projectId}/tasks/${taskId}`;
+    const taskUrl = taskLink(workspaceId, projectId, taskId);
     const notifyBase = {
       actorId,
       actorName: user.name,

@@ -7,6 +7,7 @@ import { Sprint, SprintSchema } from './schemas/sprint.schema';
 import { Task, TaskSchema } from '@modules/tasks/schemas/task.schema';
 import { ProjectsModule } from '@modules/projects/projects.module';
 import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
+import { NotificationsModule } from '@modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
     ]),
     ProjectsModule,
     WorkspacesModule,
+    NotificationsModule,
   ],
   controllers: [SprintsController],
   providers: [SprintsService, SprintsReportService],

@@ -11,7 +11,7 @@ REST API with JWT authentication (HttpOnly cookies), WebSockets for real-time up
 
 - **Framework**: NestJS (TypeScript)
 - **Database**: MongoDB via Mongoose
-- **Cache / Queue**: Redis + Bull
+- **Cache / Queue**: Redis + BullMQ (`@nestjs/bullmq`)
 - **Auth**: JWT (access token 15min, refresh token 7d) via Passport
 - **Real-time**: Socket.io
 - **File storage**: MinIO (S3-compatible)
@@ -91,9 +91,10 @@ WorkspacesModule → AuthModule
 ProjectsModule → WorkspacesModule
 TasksModule → ProjectsModule, WorkspacesModule, ActivityModule, NotificationsModule
 CommentsModule → TasksModule, ActivityModule, NotificationsModule
-SprintsModule → ProjectsModule, WorkspacesModule (registers TaskSchema directly)
+SprintsModule → ProjectsModule, WorkspacesModule, NotificationsModule (registers TaskSchema directly)
 ActivityModule → (standalone, called by other services)
-NotificationsModule → (standalone, called by other services)
+NotificationsModule → (standalone; registers User/Task/Project schemas directly to stay
+                       importable by the modules that depend on it)
 FilesModule → (standalone, registers TaskSchema directly)
 SearchModule → (standalone, registers Task/Project/User schemas directly)
 ```
@@ -231,11 +232,35 @@ async deleteTask(taskId: string, user: UserDocument) {
 
 ---
 
+## Notification Pipeline
+
+Notifications never run on the request path. The flow is:
+
+```
+service call → NotificationsService.notify()   (producer: one queue.add, no Mongo, no socket)
+             → BullMQ queue "notifications" in Redis
+             → NotificationsProcessor           (worker: insertMany + unread count)
+             → NotificationsGateway.pushNotification()
+             → socket.io room `user:<id>`       (every tab that user has open)
+```
+
+Key points:
+
+- **Producer**: `NotificationsService` is the only thing other modules touch. Its `notify*` helpers build the copy/link and enqueue; they never throw and they drop the actor from the recipient list by default (you are not notified about your own comment or status change). Events that *should* reach the actor pass `includeActor: true` — currently only `notifyTaskAssigned`, so assigning a task to yourself still notifies you (with "You assigned yourself a task" wording).
+- **Worker**: `NotificationsProcessor` handles both job types — `create-notification` and `scan-due-tasks`. It is registered with `concurrency: 5` and runs inside the API process; moving it to a dedicated worker process means starting the same Nest app with only this module.
+- **Idempotency**: jobs may carry a `dedupeKey`. The `(recipientId, dedupeKey)` unique partial index plus `insertMany({ ordered: false })` makes re-delivery a no-op, which is what lets the due-date scan re-run safely.
+- **Scheduler**: `NotificationsScheduler` upserts a BullMQ job scheduler on boot (`*/15 * * * *`) that scans for tasks due within 24h / already overdue and queues `task_due_soon` / `task_overdue` notifications for their assignees. Upsert is idempotent, so restarting the API does not duplicate it.
+- **Socket auth**: the gateway reads the `access_token` **cookie** off the handshake (`handshake.headers.cookie`) — the browser cannot put an HttpOnly cookie into `handshake.auth`. On rejection it emits `unauthorized` before disconnecting so the client can refresh its token and reconnect.
+- **Events**: `notification:new` (`{ notification, unreadCount }`) and `notification:count` (`{ unreadCount }`). The unread count is always computed server-side — the client never derives the badge number itself.
+- **Links**: `notification.link` is a **relative** SPA path built by `notification-links.ts`. Prefix it with `appUrl` if a link ever has to leave the app (emails).
+
+---
+
 ## Key Patterns Already Implemented
 
 ### Fire-and-forget services
 
-`ActivityService.log()` and `NotificationsService.notify()` both wrap their logic in try/catch internally and never throw to the caller. If MongoDB or email momentarily fails, the user's actual operation (e.g. updating a task) still succeeds. Never wrap calls to these in try/catch in the calling service — it's redundant, they already handle their own errors.
+`ActivityService.log()` and `NotificationsService.notify()` both wrap their logic in try/catch internally and never throw to the caller. If MongoDB or Redis momentarily fails, the user's actual operation (e.g. updating a task) still succeeds. Never wrap calls to these in try/catch in the calling service — it's redundant, they already handle their own errors.
 
 ```typescript
 // ✅ correct — no try/catch needed, log() handles its own errors
@@ -367,12 +392,13 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Comments (task comments + @mentions)
 - ✅ Sprints (sprint planning + burndown)
 - ✅ Activity (audit log + integrated into tasks & comments)
-- ✅ Notifications (in-app + email + WebSocket push + integrated into tasks, comments & auth)
+- ✅ Notifications (BullMQ queue + worker, WebSocket push, due-date scanner, email service; integrated into tasks, comments, sprints & auth)
 - ✅ Files (MinIO upload/download)
 - ✅ Search (full-text search)
 - ✅ Table Settings (per-user saved table view/page-size/column preferences, one doc per user+key)
 - ✅ Sidebar Settings (per-user saved sidebar nav module visibility/order + collapsed state, one doc per user)
 - ✅ Workspace Activity Log endpoint (`GET /workspaces/:workspaceId/activity`, filterable by user/module/action/date-range — powers the frontend's Activity Log page)
+- ✅ Notifications table filters (`GET /notifications` extended with `isRead`/`type`/`dateFrom`/`dateTo`, alongside the existing `page`/`limit`/`unreadOnly` — powers the frontend's Notifications table page, same shape as the Activity Log's filter set)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 - ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
 
@@ -405,7 +431,7 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 
 ## Table Settings Module Notes
 
-- One document per `{ userId, key }` pair (unique index) — `key` is an arbitrary string identifying which table the settings belong to. Two in use so far: `"myTasks"` and `"activityLog"`. Reuse the same collection for future customizable tables (a new `key`) rather than adding a new one — this is exactly what it's for.
+- One document per `{ userId, key }` pair (unique index) — `key` is an arbitrary string identifying which table the settings belong to. Three in use so far: `"myTasks"`, `"activityLog"`, `"notifications"`. Reuse the same collection for future customizable tables (a new `key`) rather than adding a new one — this is exactly what it's for.
 - `PUT /table-settings/:key` is an upsert (`findOneAndUpdate` with `upsert: true`) — the frontend calls it on every preference change (view style, page size, column visibility/order), so there is no separate create endpoint.
 - `columns` is stored as an ordered array of `{ id, visible, width }` — array order **is** the display order the frontend renders columns in; there's no separate `order` field. `width` is the saved pixel width from the frontend's column-resize mode; `null`/omitted means "use that view's default width".
 - The `TableColumnSetting` subdocument schema field is named `columnId`, not `id` — see the NOTE comment on it in `schemas/table-settings.schema.ts`. Mongoose subdocuments auto-add a virtual `id` getter/setter derived from `_id`; a real path also named `id` collides with it and silently never persists (only an auto-generated `_id` survives). `TableSettingsService.toResponse()` maps `columnId` back to `id` at the API boundary so the wire format is unaffected — if you add more subdocument fields here, avoid `id` as a name for the same reason.
@@ -420,6 +446,11 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
   - `RequestContextMiddleware` is registered globally (`AppModule.configure()`, `forRoutes('*')`) and stashes each request's IP (`X-Forwarded-For`'s first hop, falling back to `req.ip`) and raw `User-Agent` header into an `AsyncLocalStorage` (`requestContext`) for the duration of that request's async context.
   - `ActivityService.log()` reads `requestContext.get()` and parses the User-Agent with `ua-parser-js` (`UAParser(userAgent)`) into separate `browser`/`os`/`device` strings via private `formatBrowser`/`formatOs`/`formatDevice` helpers — this is why call sites never had to change to pass this data explicitly, same as `module`.
   - All four fields are `null` if activity is ever logged outside an HTTP request (no current caller does this, but nothing enforces it can't happen) or if the middleware didn't run for some reason.
+
+## Notifications Table Filters Notes
+
+- `NotificationsController.findAll` / `NotificationsService.findForUser` now take a query object (`page`, `limit`, `unreadOnly`, `isRead`, `type`, `dateFrom`, `dateTo`) instead of positional args — added for the frontend's Notifications table page. `isRead` (explicit `true`/`false`) takes precedence over the older `unreadOnly` boolean when both are present; the bell panel still calls the endpoint with neither, the table page always sends `isRead` (or omits it for "all").
+- `dateFrom`/`dateTo` filter on `createdAt` with `$gte`/`$lte`, same convention as the workspace Activity Log's date-range filter.
 
 ## Sidebar Settings Module Notes
 

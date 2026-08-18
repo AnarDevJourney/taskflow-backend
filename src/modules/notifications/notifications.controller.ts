@@ -30,6 +30,10 @@ export class NotificationsController {
   @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)', example: 1 })
   @ApiQuery({ name: 'limit', required: false, description: 'Results per page (default 20)', example: 20 })
   @ApiQuery({ name: 'unreadOnly', required: false, description: 'Pass "true" to return only unread notifications', example: 'false' })
+  @ApiQuery({ name: 'isRead', required: false, description: 'Filter by read state: "true" or "false" — takes precedence over unreadOnly', example: 'false' })
+  @ApiQuery({ name: 'type', required: false, description: 'Filter by notification type', example: 'task_assigned' })
+  @ApiQuery({ name: 'dateFrom', required: false, description: 'ISO date — only notifications created on/after this' })
+  @ApiQuery({ name: 'dateTo', required: false, description: 'ISO date — only notifications created on/before this' })
   @ApiResponse({ status: 200, description: 'Paginated notifications list' })
   @ApiResponse({ status: 401, description: 'Not authenticated' })
   findAll(
@@ -37,13 +41,20 @@ export class NotificationsController {
     @Query('page') page: string,
     @Query('limit') limit: string,
     @Query('unreadOnly') unreadOnly: string,
+    @Query('isRead') isRead: string,
+    @Query('type') type: string,
+    @Query('dateFrom') dateFrom: string,
+    @Query('dateTo') dateTo: string,
   ) {
-    return this.notificationsService.findForUser(
-      (user._id as any).toString(),
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
-      unreadOnly === 'true',
-    );
+    return this.notificationsService.findForUser((user._id as any).toString(), {
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 20,
+      unreadOnly: unreadOnly === 'true',
+      isRead: isRead === 'true' ? true : isRead === 'false' ? false : undefined,
+      type,
+      dateFrom,
+      dateTo,
+    });
   }
 
   @Get('unread-count')

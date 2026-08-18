@@ -28,11 +28,22 @@ export class Notification {
   @Prop({ required: true, enum: NotificationType })
   type: NotificationType;
 
+  // i18n message keys (see frontend's `notifications.messages.*` locale
+  // entries) instead of literal English text — the client interpolates
+  // `titleParams`/`bodyParams` into the key for the user's current language.
+  // Not always 1:1 with `type` — e.g. TASK_ASSIGNED uses `taskAssignedSelf`
+  // when the recipient assigned the task to themself.
   @Prop({ required: true })
-  title: string;
+  titleKey: string;
+
+  @Prop({ type: Object, default: {} })
+  titleParams: Record<string, string | number>;
 
   @Prop({ required: true })
-  body: string;
+  bodyKey: string;
+
+  @Prop({ type: Object, default: {} })
+  bodyParams: Record<string, string | number>;
 
   // deep link — frontend navigates here on click
   @Prop({ type: String, default: null })
@@ -53,9 +64,25 @@ export class Notification {
 
   @Prop({ type: Date, default: null })
   readAt: Date | null;
+
+  // idempotency key for notifications produced by the recurring scanner
+  // (due-soon / overdue). Null for regular event-driven notifications.
+  @Prop({ type: String, default: null })
+  dedupeKey: string | null;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
 NotificationSchema.index({ recipientId: 1, isRead: 1, createdAt: -1 });
 NotificationSchema.index({ recipientId: 1, createdAt: -1 });
+
+// guarantees the due-soon / overdue scanner can re-run every 15 minutes
+// without ever writing the same notification twice — the worker inserts
+// unordered and swallows the resulting duplicate-key errors
+NotificationSchema.index(
+  { recipientId: 1, dedupeKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { dedupeKey: { $type: 'string' } },
+  },
+);

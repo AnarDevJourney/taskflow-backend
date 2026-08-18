@@ -27,6 +27,8 @@ import { ForgotPasswordDto, ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtPayload, JwtRefreshPayload } from './types/jwt-payload.interface';
 import { WorkspaceRole } from '@modules/workspaces/enums/workspace-role.enum';
 import { EmailService } from '@modules/notifications/email.service';
+import { NotificationsService } from '@modules/notifications/notifications.service';
+import { workspaceMembersLink } from '@modules/notifications/notification-links';
 
 const BCRYPT_ROUNDS = 12;
 const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
@@ -60,6 +62,7 @@ export class AuthService {
     private jwtService: JwtService,
     private config: AppConfigService,
     private emailService: EmailService,
+    private notificationsService: NotificationsService,
     @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
@@ -315,6 +318,24 @@ export class AuthService {
       role,
       inviteUrl,
     });
+
+    // if the invitee already has an account they will land in the app, not
+    // in the email — give them an in-app notification too
+    const existingUser = await this.userModel
+      .findOne({ email: email.toLowerCase() })
+      .select('_id');
+
+    if (existingUser) {
+      await this.notificationsService.notifyWorkspaceInvite({
+        recipientId: (existingUser._id as Types.ObjectId).toString(),
+        actorId: invitedBy,
+        actorName: inviterName,
+        workspaceId,
+        workspaceName,
+        role,
+        inviteUrl: workspaceMembersLink(workspaceId),
+      });
+    }
 
     this.logger.log(`Invite created for ${email} (role: ${role})`);
 
