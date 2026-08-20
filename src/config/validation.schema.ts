@@ -28,6 +28,10 @@ export const validationSchema = Joi.object({
   MINIO_SECRET_KEY: Joi.string().required(),
   MINIO_BUCKET: Joi.string().default('taskflow'),
   MINIO_USE_SSL: Joi.string().valid('true', 'false').default('false'),
+  // 5 MB is the S3 minimum part size and the MinIO SDK's hard floor
+  MINIO_PART_SIZE_MB: Joi.number().min(5).max(5120).default(5),
+  MINIO_REGION: Joi.string().default('us-east-1'),
+  MINIO_PUBLIC_URL: Joi.string().uri().allow('').default(''),
 
   // Email
   SMTP_HOST: Joi.string().required(),
@@ -37,5 +41,7 @@ export const validationSchema = Joi.object({
   SMTP_FROM: Joi.string().required(),
 
   // Upload
-  MAX_UPLOAD_MB: Joi.number().default(50),
+  MAX_UPLOAD_MB: Joi.number().min(1).default(100),
+  MAX_IMAGE_UPLOAD_MB: Joi.number().min(1).default(5),
+  PRESIGNED_URL_EXPIRY: Joi.number().min(1).max(604800).default(3600),
 });

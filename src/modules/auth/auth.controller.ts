@@ -28,6 +28,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { UserDocument } from '@modules/users/schemas/user.schema';
 import { AppConfigService } from '@config/config.service';
 import { Throttle } from '@common/decorators/throttle.decorator';
+import { AUTH_THROTTLE } from '@config/throttler.config';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -39,7 +40,7 @@ export class AuthController {
 
   // ─── Login ──────────────────────────────────────────────────────
   @Public()
-  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
+  @Throttle(AUTH_THROTTLE)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Log in with email and password' })
@@ -68,7 +69,7 @@ export class AuthController {
 
   // ─── Register ───────────────────────────────────────────────────
   @Public()
-  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
+  @Throttle(AUTH_THROTTLE)
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new account using a workspace invite token' })
@@ -143,7 +144,7 @@ export class AuthController {
 
   // ─── Forgot Password ────────────────────────────────────────────
   @Public()
-  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
+  @Throttle(AUTH_THROTTLE)
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password reset email' })
@@ -154,7 +155,7 @@ export class AuthController {
 
   // ─── Reset Password ─────────────────────────────────────────────
   @Public()
-  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
+  @Throttle(AUTH_THROTTLE)
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password using the token from the reset email' })

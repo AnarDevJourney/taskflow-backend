@@ -16,6 +16,8 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { WorkspaceRole } from './enums/workspace-role.enum';
 import { toObjectId } from '@common/utils/object-id';
+import { MinioService } from '@common/storage/minio.service';
+import { StreamedFile } from '@common/upload';
 
 @Injectable()
 export class WorkspacesService {
@@ -23,6 +25,7 @@ export class WorkspacesService {
     @InjectModel(Workspace.name)
     private workspaceModel: Model<WorkspaceDocument>,
     private authService: AuthService,
+    private minio: MinioService,
   ) {}
 
   // ─── Create Workspace ───────────────────────────────────────────
@@ -141,6 +144,67 @@ export class WorkspacesService {
     await this.workspaceModel.findByIdAndUpdate(workspace._id, {
       archivedAt: null,
     });
+  }
+
+  // ─── Set Logo ───────────────────────────────────────────────────
+  // The image is already streamed into MinIO by the time this runs —
+  // WorkspaceLogoResolver ran the existence and role checks before a single
+  // byte of it was read, which is why there is no repeated check here.
+  async setLogo(
+    workspaceId: string,
+    file: StreamedFile,
+  ): Promise<{ logoUrl: string }> {
+    const logoUrl = this.minio.publicUrl(file.key);
+
+    let previous: WorkspaceDocument | null = null;
+    try {
+      previous = await this.workspaceModel
+        .findOneAndUpdate(
+          { _id: toObjectId(workspaceId), archivedAt: null },
+          { logoUrl, logoKey: file.key },
+          { new: false, projection: { logoKey: 1 } },
+        )
+        .select('+logoKey')
+        .exec();
+
+      if (!previous) throw new NotFoundException('Workspace not found');
+    } catch (err) {
+      await this.minio.removeQuietly(file.key); // rollback
+      throw err;
+    }
+
+    // Best-effort cleanup of the image just replaced — losing it leaves an
+    // orphan, not a broken workspace, so it must not fail the request.
+    if (previous.logoKey && previous.logoKey !== file.key) {
+      await this.minio.removeQuietly(previous.logoKey);
+    }
+
+    return { logoUrl };
+  }
+
+  // ─── Remove Logo ────────────────────────────────────────────────
+  async removeLogo(workspaceId: string, user: UserDocument): Promise<void> {
+    const workspace = await this.findOne(workspaceId, user);
+
+    this.assertRole(workspace, user, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
+
+    const current = await this.workspaceModel
+      .findById(workspace._id)
+      .select('+logoKey')
+      .lean()
+      .exec();
+
+    if (!current?.logoKey) return;
+
+    await this.workspaceModel.updateOne(
+      { _id: workspace._id },
+      { logoUrl: null, logoKey: null },
+    );
+
+    await this.minio.removeQuietly(current.logoKey);
   }
 
   // ─── Get Members ────────────────────────────────────────────────

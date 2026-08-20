@@ -35,8 +35,14 @@ export class Workspace {
   @Prop({ type: [WorkspaceMemberSchema], default: [] })
   members: WorkspaceMember[];
 
+  // Direct, non-expiring URL under the bucket's public/ prefix — see the
+  // same note on User.avatarUrl.
   @Prop({ default: null })
   logoUrl: string;
+
+  // Object key backing logoUrl, kept so a replaced logo can be deleted.
+  @Prop({ default: null, select: false, type: String })
+  logoKey: string | null;
 
   @Prop({ default: null })
   archivedAt: Date;

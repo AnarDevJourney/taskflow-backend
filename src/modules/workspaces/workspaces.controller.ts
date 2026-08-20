@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -15,6 +16,8 @@ import {
   ApiResponse,
   ApiParam,
   ApiCookieAuth,
+  ApiBody,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { WorkspacesService } from './workspaces.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
@@ -22,6 +25,14 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { Throttle } from '@common/decorators/throttle.decorator';
+import { UPLOAD_THROTTLE } from '@config/throttler.config';
+import {
+  StreamedFile,
+  StreamedFileMeta,
+  StreamingFileInterceptor,
+} from '@common/upload';
+import { WorkspaceLogoResolver } from './resolvers/workspace-logo.resolver';
 import { UserDocument } from '@modules/users/schemas/user.schema';
 
 @ApiTags('Workspaces')
@@ -113,6 +124,52 @@ export class WorkspacesController {
     @CurrentUser() user: UserDocument,
   ) {
     return this.workspacesService.restore(workspaceId, user);
+  }
+
+  // ─── Logo ───────────────────────────────────────────────────────
+
+  @Throttle(UPLOAD_THROTTLE)
+  @Post(':workspaceId/logo')
+  @UseInterceptors(StreamingFileInterceptor('file', WorkspaceLogoResolver))
+  @ApiOperation({
+    summary: 'Upload a workspace logo (owner/admin only, rate-limited: 20/hour)',
+    description:
+      'Streamed straight into MinIO under the bucket public prefix, so the returned URL can be used directly in an <img> tag. Replacing a logo deletes the previous image.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Returns { logoUrl }' })
+  @ApiResponse({ status: 400, description: 'Not a JPEG/PNG/WebP image, or larger than MAX_IMAGE_UPLOAD_MB' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Requires workspace owner or admin' })
+  @ApiResponse({ status: 404, description: 'Workspace not found' })
+  setLogo(
+    @Param('workspaceId') workspaceId: string,
+    @StreamedFileMeta() file: StreamedFile,
+  ) {
+    return this.workspacesService.setLogo(workspaceId, file);
+  }
+
+  @Delete(':workspaceId/logo')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove the workspace logo (owner/admin only)' })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiResponse({ status: 204, description: 'Logo cleared' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Requires workspace owner or admin' })
+  @ApiResponse({ status: 404, description: 'Workspace not found' })
+  removeLogo(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: UserDocument,
+  ) {
+    return this.workspacesService.removeLogo(workspaceId, user);
   }
 
   // ─── Members ────────────────────────────────────────────────────

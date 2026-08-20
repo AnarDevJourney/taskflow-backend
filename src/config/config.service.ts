@@ -80,6 +80,29 @@ export class AppConfigService {
     return this.config.get<boolean>('minio.useSSL', false);
   }
 
+  get minioRegion(): string {
+    return this.config.get<string>('minio.region', 'us-east-1');
+  }
+
+  get minioPartSizeBytes(): number {
+    return this.config.get<number>('minio.partSizeMb', 5) * 1024 * 1024;
+  }
+
+  // Base URL for objects served straight from MinIO (public/ prefix only).
+  get minioPublicUrl(): string {
+    const configured = this.config.get<string>('minio.publicUrl', '');
+    if (configured) return configured.replace(/\/+$/, '');
+
+    const scheme = this.minioUseSSL ? 'https' : 'http';
+    const port = this.minioPort;
+    const isDefaultPort =
+      (this.minioUseSSL && port === 443) || (!this.minioUseSSL && port === 80);
+
+    return isDefaultPort
+      ? `${scheme}://${this.minioEndpoint}`
+      : `${scheme}://${this.minioEndpoint}:${port}`;
+  }
+
   // ─── Email ──────────────────────────────────────────────────────
   get smtpHost(): string {
     return this.config.get<string>('email.host', '');
@@ -103,6 +126,15 @@ export class AppConfigService {
 
   // ─── Upload ─────────────────────────────────────────────────────
   get maxUploadBytes(): number {
-    return this.config.get<number>('upload.maxMb', 50) * 1024 * 1024;
+    return this.config.get<number>('upload.maxMb', 100) * 1024 * 1024;
+  }
+
+  // Separate, much smaller ceiling for avatars / workspace logos
+  get maxImageUploadBytes(): number {
+    return this.config.get<number>('upload.maxImageMb', 5) * 1024 * 1024;
+  }
+
+  get presignedUrlExpiry(): number {
+    return this.config.get<number>('upload.presignedUrlExpiry', 3600);
   }
 }

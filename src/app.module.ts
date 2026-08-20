@@ -5,8 +5,10 @@ import { AppService } from './app.service';
 import { AppConfigModule } from '@config/config.module';
 import { DatabaseModule } from '@database/database.module';
 import { RedisModule } from '@common/redis/redis.module';
+import { StorageModule } from '@common/storage/storage.module';
 import { QueueModule } from '@common/queue/queue.module';
 import { AuthModule } from '@modules/auth/auth.module';
+import { UsersModule } from '@modules/users/users.module';
 import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
 import { ProjectsModule } from '@modules/projects/projects.module';
 import { TasksModule } from '@modules/tasks/tasks.module';
@@ -28,8 +30,10 @@ import { throttlerConfig } from './config/throttler.config';
     AppConfigModule,
     DatabaseModule,
     RedisModule,
+    StorageModule,
     QueueModule,
     AuthModule,
+    UsersModule,
     WorkspacesModule,
     ProjectsModule,
     TasksModule,

@@ -14,7 +14,7 @@ REST API with JWT authentication (HttpOnly cookies), WebSockets for real-time up
 - **Cache / Queue**: Redis + BullMQ (`@nestjs/bullmq`)
 - **Auth**: JWT (access token 15min, refresh token 7d) via Passport
 - **Real-time**: Socket.io
-- **File storage**: MinIO (S3-compatible)
+- **File storage**: MinIO (S3-compatible), uploads streamed via Multer + a custom storage engine
 - **Email**: Nodemailer + Handlebars templates
 - **Validation**: class-validator + class-transformer
 - **User-Agent parsing**: ua-parser-js (Activity Log's `browser`/`os`/`device` fields)
@@ -35,10 +35,12 @@ src/
 │   ├── interceptors/     # TransformInterceptor, LoggingInterceptor
 │   ├── middleware/       # RequestContextMiddleware (global, captures IP + User-Agent per request)
 │   ├── context/          # request-context.ts — AsyncLocalStorage store read by ActivityService.log()
+│   ├── storage/          # MinIO clients (DI tokens) + MinioService — the only thing that talks to object storage
+│   ├── upload/           # streaming upload infra: multer storage engine, interceptor, resolvers contract, MIME/size constants
 │   └── utils/            # pagination, object-id, slug helpers
 └── modules/
     ├── auth/             # login, register, invite, refresh, reset password
-    ├── users/            # user schema (shared)
+    ├── users/            # user schema (shared) + avatar upload
     ├── workspaces/       # workspace CRUD + member management
     ├── projects/         # project CRUD + kanban status config
     ├── tasks/            # task CRUD + bulk ops + filtering
@@ -46,7 +48,7 @@ src/
     ├── sprints/          # sprint planning + burndown
     ├── activity/         # audit log (immutable)
     ├── notifications/    # in-app + email notifications
-    ├── files/            # MinIO upload/download
+    ├── files/            # task attachments — streaming upload, presigned download
     ├── search/           # full-text search
     ├── table-settings/   # per-user saved table preferences (view style, page size, column visibility/order), keyed by a `key` string per table (e.g. "myTasks")
     └── sidebar-settings/ # per-user saved sidebar preferences (nav module visibility/order, collapsed state) — one doc per user, singular Get/Put (no `key`)
@@ -95,7 +97,9 @@ SprintsModule → ProjectsModule, WorkspacesModule, NotificationsModule (registe
 ActivityModule → (standalone, called by other services)
 NotificationsModule → (standalone; registers User/Task/Project schemas directly to stay
                        importable by the modules that depend on it)
-FilesModule → (standalone, registers TaskSchema directly)
+UsersModule → (standalone, schema only; MinioService comes from the global StorageModule)
+FilesModule → ProjectsModule, WorkspacesModule, ActivityModule (registers TaskSchema directly)
+StorageModule → @Global, provides MinioService to every module without an explicit import
 SearchModule → (standalone, registers Task/Project/User schemas directly)
 ```
 
@@ -315,13 +319,34 @@ Nothing is permanently deleted immediately. Set `archivedAt` / `deletedAt` to `n
 
 ## Rate Limiting
 
-Rate limiting is applied globally via `ThrottlerGuard` registered as `APP_GUARD` in `AppModule`. Three named tiers are defined in `src/config/throttler.config.ts`:
+Rate limiting is applied globally via `ThrottlerGuard` registered as `APP_GUARD` in `AppModule`.
 
-| Tier | TTL | Limit | Purpose |
+### One throttler at the root — this is deliberate
+
+`src/config/throttler.config.ts` registers exactly **one** throttler (`default`, 300 req / 60 s). Stricter endpoints override that same throttler rather than adding a second named one:
+
+```typescript
+import { Throttle } from '@common/decorators/throttle.decorator';
+import { AUTH_THROTTLE, UPLOAD_THROTTLE } from '@config/throttler.config';
+
+@Throttle(AUTH_THROTTLE)    // 10 req / 60 s   — credential endpoints
+@Throttle(UPLOAD_THROTTLE)  // 20 req / 60 min — MinIO writes
+```
+
+**Never add a second named throttler to `throttlerConfig`.** Every throttler registered there is evaluated on *every* route — a named throttler is not opt-in, and `@Throttle({ name: ... })` only changes that throttler's limit on the decorated handler. The config previously registered `auth` (10/min) and `upload` (20/hour) alongside `default`, which silently capped the **entire API** at 10 requests per minute and 20 per hour per IP. The tell is a `Retry-After-auth` / `X-RateLimit-Limit-upload` header on a response from a route that has no `@Throttle` decorator at all:
+
+```bash
+curl -s -D - -o /dev/null http://localhost:3000/api/v1/auth/me | grep -i ratelimit
+# healthy: only X-RateLimit-Limit / -Remaining / -Reset (the default throttler)
+```
+
+### Tiers
+
+| Constant | TTL | Limit | Purpose |
 |---|---|---|---|
-| `default` | 60 s | 300 req | Applied to all routes automatically |
-| `auth` | 60 s | 10 req | Brute-force protection on credential endpoints |
-| `upload` | 1 h | 20 req | Expensive file-write operations |
+| `throttlerConfig` `default` | 60 s | 300 req | Applied to all routes automatically |
+| `AUTH_THROTTLE` | 60 s | 10 req | Brute-force protection on credential endpoints |
+| `UPLOAD_THROTTLE` | 60 min | 20 req | Expensive file-write operations |
 
 ### Import rule
 
@@ -336,11 +361,13 @@ import { Throttle, SkipThrottle } from '@common/decorators/throttle.decorator';
 | Controller / endpoint | Decorator | Reason |
 |---|---|---|
 | `AppController GET /health` | `@SkipThrottle()` | Docker healthcheck polls every 10 s — must never be rate limited or the container reports unhealthy |
-| `AuthController POST /login` | `@Throttle({ auth: ... })` | Credential brute-force |
-| `AuthController POST /register` | `@Throttle({ auth: ... })` | Account creation spam |
-| `AuthController POST /forgot-password` | `@Throttle({ auth: ... })` | Email enumeration + spam |
-| `AuthController POST /reset-password` | `@Throttle({ auth: ... })` | Token brute-force |
-| `FilesController POST /files/upload` | `@Throttle({ upload: ... })` | MinIO write is expensive |
+| `AuthController POST /login` | `@Throttle(AUTH_THROTTLE)` | Credential brute-force |
+| `AuthController POST /register` | `@Throttle(AUTH_THROTTLE)` | Account creation spam |
+| `AuthController POST /forgot-password` | `@Throttle(AUTH_THROTTLE)` | Email enumeration + spam |
+| `AuthController POST /reset-password` | `@Throttle(AUTH_THROTTLE)` | Token brute-force |
+| `FilesController POST /files/upload` | `@Throttle(UPLOAD_THROTTLE)` | MinIO write is expensive |
+| `UsersController POST /users/me/avatar` | `@Throttle(UPLOAD_THROTTLE)` | MinIO write is expensive |
+| `WorkspacesController POST /workspaces/:workspaceId/logo` | `@Throttle(UPLOAD_THROTTLE)` | MinIO write is expensive |
 
 ### Rule: `@SkipThrottle()` is mandatory on health / readiness endpoints
 
@@ -393,7 +420,8 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Sprints (sprint planning + burndown)
 - ✅ Activity (audit log + integrated into tasks & comments)
 - ✅ Notifications (BullMQ queue + worker, WebSocket push, due-date scanner, email service; integrated into tasks, comments, sprints & auth)
-- ✅ Files (MinIO upload/download)
+- ✅ Files (streaming MinIO upload, presigned download, rollback-safe delete)
+- ✅ Avatar upload (`POST/DELETE /users/me/avatar`) and workspace logo upload (`POST/DELETE /workspaces/:workspaceId/logo`)
 - ✅ Search (full-text search)
 - ✅ Table Settings (per-user saved table view/page-size/column preferences, one doc per user+key)
 - ✅ Sidebar Settings (per-user saved sidebar nav module visibility/order + collapsed state, one doc per user)
@@ -413,6 +441,76 @@ Swagger UI is available at **`/api/docs`** in development only (`NODE_ENV !== 'p
 ## Remaining Work
 
 - ⬜ README.md run instructions — deferred until the frontend is feature-complete, do not add unprompted
+- ⬜ Frontend upload UI — the backend endpoints for task attachments, avatars and workspace logos all exist, but nothing in `taskflow-frontend` calls them yet
+
+## Files / Upload Module Notes
+
+Uploads are **streamed**: the multipart file part is piped from the request into MinIO chunk by chunk. Nothing is buffered in memory and nothing is written to disk, so process RAM stays flat whether the upload is 1 MB or 1 GB (measured: ~30 MB peak delta for a 90 MB upload, back to baseline afterwards).
+
+### The pieces
+
+| File | Role |
+|---|---|
+| `common/storage/storage.module.ts` | `@Global`. Provides two MinIO clients under DI tokens plus `MinioService`. |
+| `common/storage/minio.service.ts` | The only code that touches the SDK: `putStream`, `presignedGetUrl`, `publicUrl`, `removeObject`, `removeQuietly`, `ensureBucket`. |
+| `common/upload/minio-streaming.storage.ts` | Multer `StorageEngine`. Validates via the resolver, then pipes `file.stream` → byte counter → `putObject`. Implements `_removeFile` so multer's own abort path cleans up. |
+| `common/upload/streaming-file.interceptor.ts` | `StreamingFileInterceptor(field, ResolverClass)` — the replacement for `FileInterceptor`. Builds its own multer instance; there is no `MulterModule` registration anywhere, so nothing can silently fall back to buffering. |
+| `common/upload/upload.constants.ts` | `ALLOWED_MIME_TYPES`, `ALLOWED_AVATAR_MIME_TYPES`, `EXTENSION_BY_MIME`. Single source of truth — never inline a MIME list. |
+| `common/upload/upload.errors.ts` | `UnsupportedFileTypeException` (400), `FileTooLargeException` (400), `MalformedMultipartOrderException` (400), `MissingFileException` (400), `StorageUploadFailedException` (500). |
+
+### Adding a new upload endpoint
+
+Write an `UploadTargetResolver` provider and point the interceptor at it — do not write a new storage engine or a new interceptor:
+
+```typescript
+@Injectable()
+export class MyResolver implements UploadTargetResolver {
+  readonly allowedMimeTypes = ALLOWED_MIME_TYPES;
+  get maxBytes() { return this.config.maxUploadBytes; }
+
+  async resolve(req: Request, file: IncomingFile): Promise<UploadTarget> {
+    // permission + existence checks belong here — they run before any byte is read
+    return { key: buildObjectKey([...segments], file.originalname, file.mimetype) };
+  }
+}
+
+@Post('thing')
+@UseInterceptors(StreamingFileInterceptor('file', MyResolver))
+upload(@StreamedFileMeta() file: StreamedFile, @CurrentUser() user: UserDocument) { ... }
+```
+
+Three resolvers exist today: `TaskAttachmentResolver`, `AvatarResolver`, `WorkspaceLogoResolver`.
+
+### Things that will bite you
+
+- **`MINIO_PART_SIZE_MB` is load-bearing, not tuning.** The SDK buffers the *entire* object in RAM when its computed part size is >= the object size, and its default part size is 64 MB. Pinning `partSize` on the client sets the SDK's `overRidePartSize` flag, which forces the chunked `uploadStream` path for every upload. Remove it and every upload under 64 MB silently goes back to being a memory upload. 5 MB is the S3 minimum.
+- **`putStream` passes `size: undefined` on purpose.** A multipart file part has no known length up front, and `undefined` is what selects the chunked path. The real byte count comes from `ByteCounterStream`, measured as the data flows past.
+- **Multipart field order matters.** A streaming parser sees parts in wire order, so text fields a resolver reads off `req.body` must be appended to the `FormData` *before* the file field. Requests that get it wrong fail with an explicit 400 (`MalformedMultipartOrderException`) rather than a confusing validation error. `POST /files/upload` is the only endpoint with text fields; avatar/logo take their ids from the route.
+- **Two MinIO clients, and they are not interchangeable.** `MINIO_CLIENT` uses the in-cluster address (`minio:9000`) for reads/writes. `MINIO_PRESIGN_CLIENT` uses `MINIO_PUBLIC_URL` and exists only to sign download URLs: a SigV4 presigned URL covers the Host header, so a URL signed for `minio:9000` is rejected the moment a browser requests it through `localhost:9000`. The presign client pins `region` so signing never needs a `GetBucketLocation` round trip to an address it cannot reach.
+- **The `public/` prefix is anonymously readable.** `MinioService.ensureBucket()` applies a bucket policy granting `s3:GetObject` on `public/*` on every boot. Avatars and workspace logos live there so `avatarUrl` / `logoUrl` can go straight into an `<img src>`; task attachments never do, and are only reachable through a presigned URL.
+- **`Attachment.originalName` is deliberately not `required`.** Attachments written before the field existed have no value for it, and a required path would make `task.save()` throw on those documents. `FilesService.toResponse()` falls back to `filename`.
+- **Attachment `id` is the subdocument `_id`.** Same Mongoose virtual-`id` collision as `TableColumnSetting` / `SidebarSettingModule` — never add a real `id` path to the `Attachment` subdocument.
+
+### Rollback rules
+
+- MinIO upload fails → no Mongo write at all.
+- Mongo write fails after the upload → the object is deleted (`removeQuietly`).
+- Attachment delete → object removed from MinIO **first**, then `$pull` from `task.attachments`. The reverse order would leave an unreferenced blob if the second step failed; this order leaves metadata pointing at a missing object, which is recoverable.
+- Avatar / logo replaced → the previous object is deleted best-effort after the document update succeeds.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `POST /files/upload` | fields `workspaceId`, `projectId`, `taskId` then `file`. Key: `workspaceId/projectId/taskId/YYYY-MM-DD/<unix>_<uuid>.<ext>` |
+| `GET /files/signed-url?attachmentId=…&download=true` | 1 h presigned URL (`PRESIGNED_URL_EXPIRY`). `download=true` forces `Content-Disposition: attachment`. |
+| `DELETE /files/:attachmentId` | 204. Uploader, or workspace owner/admin. |
+| `POST /users/me/avatar` / `DELETE /users/me/avatar` | JPEG/PNG/WebP, `MAX_IMAGE_UPLOAD_MB`. Returns `{ avatarUrl }`. |
+| `POST /workspaces/:workspaceId/logo` / `DELETE …/logo` | Owner/admin only, same image rules. Returns `{ logoUrl }`. |
+
+Attachment add/remove are logged to the Activity Log (`attachment_added` / `attachment_removed`, module `attachments`) — those actions existed in the enum but nothing wrote them until now.
+
+---
 
 ## Workspaces Module Notes
 
@@ -495,4 +593,15 @@ npm run lint          # ESLint
 
 All env vars are validated at startup via Joi in `src/config/validation.schema.ts`.
 App will refuse to start if any required variable is missing.
+
+Upload/storage variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MAX_UPLOAD_MB` | `100` | Ceiling for task attachments |
+| `MAX_IMAGE_UPLOAD_MB` | `5` | Ceiling for avatars / workspace logos |
+| `PRESIGNED_URL_EXPIRY` | `3600` | Lifetime of a download URL, in seconds |
+| `MINIO_PART_SIZE_MB` | `5` | Multipart chunk size — **load-bearing**, see the Files module notes |
+| `MINIO_PUBLIC_URL` | endpoint:port | Browser-facing MinIO address; used for public object links and for signing download URLs |
+| `MINIO_REGION` | `us-east-1` | Pinned so presigning needs no `GetBucketLocation` call |
 Two env files exist — `.env` (local, non-Docker) and `.env.docker` (Docker, both dev and prod compose). Never commit either — both are gitignored.
