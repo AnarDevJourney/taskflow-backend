@@ -20,6 +20,7 @@ import { FilesModule } from './modules/files/files.module';
 import { SearchModule } from './modules/search/search.module';
 import { TableSettingsModule } from './modules/table-settings/table-settings.module';
 import { SidebarSettingsModule } from './modules/sidebar-settings/sidebar-settings.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { throttlerConfig } from './config/throttler.config';
@@ -45,6 +46,7 @@ import { throttlerConfig } from './config/throttler.config';
     SearchModule,
     TableSettingsModule,
     SidebarSettingsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [

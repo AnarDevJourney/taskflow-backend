@@ -51,7 +51,8 @@ src/
     ├── files/            # task attachments — streaming upload, presigned download
     ├── search/           # full-text search
     ├── table-settings/   # per-user saved table preferences (view style, page size, column visibility/order), keyed by a `key` string per table (e.g. "myTasks")
-    └── sidebar-settings/ # per-user saved sidebar preferences (nav module visibility/order, collapsed state) — one doc per user, singular Get/Put (no `key`)
+    ├── sidebar-settings/ # per-user saved sidebar preferences (nav module visibility/order, collapsed state) — one doc per user, singular Get/Put (no `key`)
+    └── dashboard/        # read-only reporting — every dashboard statistic in one aggregation-driven response
 
 scripts/                  # bash scripts for running the project (see Docker section)
 ├── dev.sh
@@ -101,6 +102,9 @@ UsersModule → (standalone, schema only; MinioService comes from the global Sto
 FilesModule → ProjectsModule, WorkspacesModule, ActivityModule (registers TaskSchema directly)
 StorageModule → @Global, provides MinioService to every module without an explicit import
 SearchModule → (standalone, registers Task/Project/User schemas directly)
+DashboardModule → WorkspacesModule (registers Task/Project/Sprint/User/Notification/ActivityLog
+                  schemas directly — it needs raw model access for aggregation, not those
+                  modules' services)
 ```
 
 Rule: import the **module** when you need its **service**. Register the **schema** directly with `MongooseModule.forFeature()` when you only need raw model access and importing the module would create a circular dependency.
@@ -427,6 +431,7 @@ Do not suggest `docker compose up` directly when helping with this project — t
 - ✅ Sidebar Settings (per-user saved sidebar nav module visibility/order + collapsed state, one doc per user)
 - ✅ Workspace Activity Log endpoint (`GET /workspaces/:workspaceId/activity`, filterable by user/module/action/date-range — powers the frontend's Activity Log page)
 - ✅ Notifications table filters (`GET /notifications` extended with `isRead`/`type`/`dateFrom`/`dateTo`, alongside the existing `page`/`limit`/`unreadOnly` — powers the frontend's Notifications table page, same shape as the Activity Log's filter set)
+- ✅ Dashboard (`GET /workspaces/:workspaceId/dashboard/overview` — 4 KPIs, both chart distributions, 7-day productivity trend, per-assignee workload, my-tasks/deadlines/activity lists, sprint progress and a 53-week activity heatmap, all in one response computed by aggregation pipelines)
 - ✅ Docker (dev + prod compose, multi-stage Dockerfile, automation scripts)
 - ✅ Swagger/OpenAPI (UI at /api/docs in development, all controllers + DTOs annotated)
 
@@ -556,6 +561,133 @@ Attachment add/remove are logged to the Activity Log (`attachment_added` / `atta
 - `modules` is stored the same way as `table-settings.columns`: an ordered array of `{ id, visible }`, array order **is** the sidebar's render order. The subdocument field is `moduleId`, not `id` — same Mongoose virtual-`id` collision as `TableColumnSetting` (see above), avoided the same way (`@Schema({ id: false })` + boundary mapping in `SidebarSettingsService.toResponse()`).
 - `collapsed` is a plain boolean on the top-level document, saved immediately on toggle (not batched — there's nothing to batch for a single flag).
 - Frontend merges saved `modules` with a hardcoded default list (`normalizeSidebarModules` in `AppLayout.tsx`) so a module added to the app after a user already saved settings still appears, appended at the end.
+
+## Dashboard Module Notes
+
+Read-only reporting module behind the frontend's Dashboard page. It owns no
+schema and writes nothing.
+
+- **One endpoint, one response**: `GET /workspaces/:workspaceId/dashboard/overview`.
+  There is deliberately no per-widget endpoint — every number on the page comes from
+  this call so the KPI cards, charts and lists can never disagree.
+- **Three aggregations, not eight `countDocuments()`**. `DashboardService.getOverview()`
+  fires them with `Promise.all`:
+  - `pipelines/task-overview.pipeline.ts` — the big one. A single `$match` +
+    `$addFields` prefix feeding a `$facet` with **ten** branches (three KPIs, both
+    chart distributions, the productivity trend, the per-assignee workload,
+    my-tasks + its total, upcoming deadlines, sprint roll-up), closed by a
+    `$project` that assembles the final shape.
+  - `pipelines/notifications.pipeline.ts` and `pipelines/activity.pipeline.ts`
+    exist only because MongoDB cannot `$facet` across collections. The activity one
+    is itself a two-branch `$facet` — `recent` (the newest few, with actor/task/
+    project joined *after* the `$limit`) and `heatmap` (a count per calendar day) —
+    so the audit log is still read once for both widgets.
+- **Nothing is computed in JavaScript.** Percentages, bucketing, zero-filling and the
+  sprint progress ratio are all aggregation expressions in
+  `pipelines/dashboard.expressions.ts`. `toResponse()` only fills defaults for an
+  empty workspace. Keep it that way — a statistic that migrates into JS silently
+  reintroduces the per-widget query pattern this module exists to avoid.
+- **`statusBucketExpr` is the load-bearing piece.** `task.status` is a free string
+  matching one of `project.statuses[].name`, so there is no enum to group by. A
+  `$switch` over two case-insensitive patterns normalizes every project's column
+  names into `todo` / `in_progress` / `done`. "done" is tested first so a column
+  called "Review — Done" lands in `done`. Adding a new well-known column name means
+  editing those two patterns, nothing else.
+- **The dashboard added `ActivityLogSchema.index({ workspaceId: 1, createdAt: -1 })`.**
+  Both activity branches match on `workspaceId` alone and order by `createdAt`, and
+  neither pre-existing index is a usable prefix for that — `.explain()` showed a
+  FETCH ← **SORT** ← IXSCAN, i.e. every matching entry loaded and sorted in memory
+  just to return the newest five. With the index it is LIMIT ← FETCH ← IXSCAN. If a
+  future widget introduces a new match/sort shape, check `.explain()` for a `SORT`
+  stage before shipping it; a workspace-scoped feed is exactly where this bites.
+- **`$lookup` collection names are read off the models** (`this.projectModel.collection.name`),
+  never hardcoded — a renamed collection would otherwise break a join silently.
+- **Scoping is mixed on purpose**: KPIs 1–3, both donuts, upcoming deadlines, sprint
+  progress and recent activity are workspace-wide (it's a team dashboard); `myTasks`
+  and `kpis.unreadNotifications` are the caller's own. The notifications KPI is also
+  workspace-scoped, so it is smaller than the topbar bell badge, which is account-wide.
+- **KPI trends reconstruct the previous period rather than storing history.**
+  "Active a week ago" = created before the window and either still open or only closed
+  inside it. Exact except for a task whose status changed more than once since — fine
+  for a trend chip, and it needs no snapshot collection.
+- **`completedThisMonth` uses `updatedAt` on a done task** because `Task` has no
+  `completedAt`. It over-counts a done task edited later in a different month; adding
+  a real `completedAt` is the fix, but that changes the data model.
+- **`productivityTrend` groups by a formatted local-day string**, not `$dateTrunc`,
+  so its keys match `ranges.trendDays` exactly and the zero-fill in the final
+  `$project` is a plain string comparison. `$dateToString` is given
+  `ranges.timezone` (the API process's IANA zone) — without it MongoDB would bucket
+  by UTC day and the chart would disagree with the KPI cards around midnight. The
+  seven days are precomputed in `date-ranges.ts` with the `Date(y, m, d - i)`
+  constructor rather than by subtracting milliseconds, so a DST change inside the
+  window cannot shift a day onto its neighbour.
+- **The heatmap's 371 days are generated server-side** (`ranges.heatmapDays`, 53
+  Monday-first weeks) and zero-filled by the pipeline, for the same reason the
+  trend's are: counts are bucketed into *server* calendar days, so a client
+  building its own scaffold in another timezone would slide them into the wrong
+  cells. `activityHeatmap.today` ships alongside so the client can leave
+  not-yet-happened cells blank rather than painting them as quiet days.
+- **`bucketCountsExpr` is quadratic and that is fine at 371 keys** — its inner
+  array only holds days that saw activity. A lookup-object version via
+  `$arrayToObject` + `$getField` was tried and reverted: `$getField` only accepts a
+  constant `field`, not a variable, so it cannot be driven from a `$map`.
+- **`workloadByAssignee` counts unfinished work only** (same scoping as the priority
+  donut) and excludes unassigned tasks — the chart is *by assignee*, and a "nobody"
+  bar would out-rank real people while naming no one to talk to. Capped at
+  `WORKLOAD_LIMIT` (8) busiest, since a bar per member is unreadable in a large
+  workspace and the tail is by definition not the problem. `name` is nullable: a task
+  can outlive the user row it points at.
+- **`myTasks[].project.doneStatus`** is resolved server-side (the project's column
+  whose name reads as "done", falling back to the last column in board order) so the
+  frontend's My Tasks checkbox knows what status to PATCH to. Column names are
+  per-project and free-form, so the client cannot derive it.
+- `changePercent` is `null`, not `0` or `100`, when the previous period had no
+  baseline — the UI hides the comparison chip rather than printing a fake number.
+
+### Response shape
+
+```jsonc
+{
+  "kpis": {
+    // each: { current, previous, changePercent }  — changePercent is null with no baseline
+    "activeTasks": {}, "overdueTasks": {}, "completedThisMonth": {}, "unreadNotifications": {}
+  },
+  "taskStatus":           [{ "status": "todo|in_progress|done", "count": 0 }],   // always 3, in this order
+  "priorityDistribution": [{ "priority": "critical|high|medium|low", "count": 0 }], // always 4, open work only
+  "productivityTrend":    [{ "date": "YYYY-MM-DD", "count": 0 }],                // always 7, oldest first
+  "workloadByAssignee":   [{ "userId": "", "name": "", "avatarUrl": null, "count": 0 }], // <= 8, busiest first
+  "myTasks":              [{ "_id": "", "title": "", "priority": "", "dueDate": "",
+                             "project": { "name": "", "color": "", "doneStatus": "" } }], // <= 5
+  "myTasksTotal":         0,                                                     // may exceed myTasks.length
+  "recentActivities":     [{ "action": "", "actor": {}, "task": {}, "project": {} }],     // <= 5
+  "upcomingDeadlines":    [{ "title": "", "dueDate": "", "project": {} }],       // <= 5, 7-day horizon
+  "sprint":               null,                                                  // or { name, progress, completed, inProgress, todo, total }
+  "activityHeatmap":      { "days": [{ "date": "", "count": 0 }], "today": "YYYY-MM-DD" } // always 371
+}
+```
+
+Every fixed-length array above is zero-filled and ordered by the pipeline, never by
+the client — a chart whose slices reorder or vanish between refetches is unreadable.
+
+### Adding a new dashboard widget
+
+Do **not** add an endpoint or a second query. The whole point of this module is that
+the page is one request.
+
+1. If the number comes from `tasks`, add a branch to the `$facet` in
+   `task-overview.pipeline.ts` and surface it in that pipeline's closing `$project`.
+   From `activitylogs` or `notifications`, add a branch to that collection's own
+   `$facet` instead.
+2. Compute it with aggregation expressions — reuse `percentChangeExpr` for a
+   trend chip, `bucketCountsExpr` for a fixed-order zero-filled distribution,
+   `facetCountExpr` / `facetDocExpr` to unwrap a single-row branch.
+3. Add the field to `types/dashboard-overview.interface.ts` and pass it through
+   `DashboardService.toResponse()` — which only fills defaults, never computes.
+4. Any date boundary the branch needs goes in `utils/date-ranges.ts`, built with the
+   `Date(y, m, d - n)` constructor and paired with `ranges.timezone` if the branch
+   groups by day.
+
+A fourth aggregation is only ever justified by a fourth *collection*.
 
 ---
 

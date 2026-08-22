@@ -78,3 +78,11 @@ ActivityLogSchema.index({ workspaceId: 1, actorId: 1, createdAt: -1 });
 
 // Activity Log page — filtering by module (and the workspace-wide feed in general)
 ActivityLogSchema.index({ workspaceId: 1, module: 1, createdAt: -1 });
+
+// Dashboard — the Recent Activity widget (newest N in a workspace) and the
+// activity heatmap (a date range in a workspace) both match on workspaceId
+// alone and order by createdAt. Neither index above is a usable prefix for
+// that: {workspaceId, actorId, createdAt} and {workspaceId, module, createdAt}
+// only order within an actor/module, so MongoDB fell back to an in-memory SORT
+// of every matching entry to return the top 5 (verified with .explain()).
+ActivityLogSchema.index({ workspaceId: 1, createdAt: -1 });
