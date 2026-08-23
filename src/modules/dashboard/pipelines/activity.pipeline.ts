@@ -4,6 +4,8 @@ import { bucketCountsExpr } from './dashboard.expressions';
 
 export interface ActivityPipelineParams {
   workspaceId: Types.ObjectId;
+  /** narrows both facets to one project when the dashboard's project filter is set */
+  projectId: Types.ObjectId | null;
   /** how many rows the Recent Activity widget shows */
   limit: number;
   ranges: DashboardRanges;
@@ -25,6 +27,7 @@ export interface ActivityPipelineParams {
  */
 export function buildActivityPipeline({
   workspaceId,
+  projectId,
   limit,
   ranges,
   collections,
@@ -32,7 +35,7 @@ export function buildActivityPipeline({
   const { heatmapStart, heatmapDays, timezone } = ranges;
 
   return [
-    { $match: { workspaceId } },
+    { $match: { workspaceId, ...(projectId ? { projectId } : {}) } },
     {
       $facet: {
         recent: [

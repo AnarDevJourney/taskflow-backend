@@ -15,17 +15,20 @@ import {
   ActivityLogSchema,
 } from '@modules/activity/schemas/activity-log.schema';
 import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
+import { ProjectsModule } from '@modules/projects/projects.module';
 
 /**
  * Read-only reporting module — it aggregates over data other modules own and
  * writes nothing itself.
  *
  * Every schema is registered directly with `forFeature()` rather than
- * importing Tasks/Projects/Sprints/Notifications/Activity, per the module
- * dependency rule: the dashboard needs raw model access for aggregation, not
- * those modules' services, and importing all six would drag half the app's
- * dependency graph in behind them. WorkspacesModule is a real import because
- * membership checking is genuinely `WorkspacesService.findOne()`'s job.
+ * importing Tasks/Sprints/Notifications/Activity, per the module dependency
+ * rule: the dashboard needs raw model access for aggregation, not those
+ * modules' services, and importing all of them would drag half the app's
+ * dependency graph in behind them. WorkspacesModule and ProjectsModule are
+ * real imports because membership checking and the project-filter's
+ * existence/ownership check are genuinely `WorkspacesService.findOne()` /
+ * `ProjectsService.findOne()`'s job.
  */
 @Module({
   imports: [
@@ -38,6 +41,7 @@ import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
       { name: ActivityLog.name, schema: ActivityLogSchema },
     ]),
     WorkspacesModule,
+    ProjectsModule,
   ],
   controllers: [DashboardController],
   providers: [DashboardService],

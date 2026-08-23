@@ -1,8 +1,9 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -25,18 +26,25 @@ export class DashboardController {
     name: 'workspaceId',
     description: 'MongoDB ObjectId of the workspace',
   })
+  @ApiQuery({
+    name: 'projectId',
+    required: false,
+    description:
+      'MongoDB ObjectId of a project in this workspace. When given, every number in the response is narrowed to that project instead of the whole workspace.',
+  })
   @ApiResponse({
     status: 200,
     description:
-      'Dashboard overview. KPIs, both chart distributions, the deadline list, sprint progress and recent activity are workspace-wide; `myTasks` and `kpis.unreadNotifications` are scoped to the caller.',
+      'Dashboard overview. KPIs, both chart distributions, the deadline list, sprint progress and recent activity are workspace-wide (or project-wide when `projectId` is given); `myTasks` and `kpis.unreadNotifications` are scoped to the caller.',
   })
   @ApiResponse({ status: 401, description: 'Not authenticated' })
   @ApiResponse({ status: 403, description: 'Not a workspace member' })
-  @ApiResponse({ status: 404, description: 'Workspace not found' })
+  @ApiResponse({ status: 404, description: 'Workspace or project not found' })
   getOverview(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: UserDocument,
+    @Query('projectId') projectId?: string,
   ) {
-    return this.dashboardService.getOverview(workspaceId, user);
+    return this.dashboardService.getOverview(workspaceId, user, projectId);
   }
 }

@@ -16,6 +16,8 @@ export interface TaskOverviewPipelineParams {
   workspaceId: Types.ObjectId;
   /** the caller — only the "my tasks" facet is scoped to them */
   userId: Types.ObjectId;
+  /** narrows every facet to one project when the dashboard's project filter is set */
+  projectId: Types.ObjectId | null;
   ranges: DashboardRanges;
   /** real collection names, read off the Mongoose models (never hardcoded) */
   collections: { projects: string; sprints: string; users: string };
@@ -45,6 +47,7 @@ const WORKLOAD_LIMIT = 8;
 export function buildTaskOverviewPipeline({
   workspaceId,
   userId,
+  projectId,
   ranges,
   collections,
 }: TaskOverviewPipelineParams): PipelineStage[] {
@@ -66,7 +69,17 @@ export function buildTaskOverviewPipeline({
 
   return [
     // ─── Scope ───────────────────────────────────────────────────────
-    { $match: { workspaceId, archivedAt: null } },
+    // `projectId` narrows every facet below to one project when the
+    // dashboard's project filter is set — added to the same top-level
+    // `$match` rather than per-facet, so the whole page stays consistent
+    // with no branch forgetting the filter.
+    {
+      $match: {
+        workspaceId,
+        archivedAt: null,
+        ...(projectId ? { projectId } : {}),
+      },
+    },
 
     // Normalize once, up front, so every facet below can group and filter on
     // a three-value enum instead of re-running the `$switch` per branch.
@@ -110,31 +123,20 @@ export function buildTaskOverviewPipeline({
         ],
 
         // ─── KPI 2 — overdue tasks, vs. a week ago ─────────────────
-        // Same population both sides (still-unfinished tasks with a due
-        // date), only the cut-off moves — so the comparison answers "is the
-        // overdue backlog growing?".
+        // Any task whose due date has passed counts, done or not — this is
+        // "how many deadlines were missed", not "how much open work is late".
+        // Same population both sides, only the cut-off moves — so the
+        // comparison answers "is the number of missed deadlines growing?".
         overdueTasks: [
           { $match: { dueDate: { $ne: null } } },
           {
             $group: {
               _id: null,
               current: {
-                $sum: {
-                  $cond: [
-                    { $and: [isNotDone, { $lt: ['$dueDate', now] }] },
-                    1,
-                    0,
-                  ],
-                },
+                $sum: { $cond: [{ $lt: ['$dueDate', now] }, 1, 0] },
               },
               previous: {
-                $sum: {
-                  $cond: [
-                    { $and: [isNotDone, { $lt: ['$dueDate', weekStart] }] },
-                    1,
-                    0,
-                  ],
-                },
+                $sum: { $cond: [{ $lt: ['$dueDate', weekStart] }, 1, 0] },
               },
             },
           },

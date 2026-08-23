@@ -544,6 +544,7 @@ Attachment add/remove are logged to the Activity Log (`attachment_added` / `atta
 - `WorkspaceActivityController` (`workspace-activity.controller.ts`) is separate from `ActivityController` — same `ActivityService`/`ActivityLog` schema, different base path (`workspaces/:workspaceId/activity`, not nested under a project/task) and a different query shape (`ActivityService.findByWorkspace()`).
 - `ActivityLog` has a real, stored `module` field (enum, `ACTIVITY_MODULES` from `activity/utils/activity-module.util.ts` — 6 buckets: `task`, `comments`, `attachments`, `sprint`, `checklist`, `watchers`). It's set once at write time by `ActivityService.log()` via `getActivityModule(params.action)` — callers never pass it explicitly, so every existing `activityService.log({...})` call site kept working unmodified. Filtering by `module` in `findByWorkspace()` is therefore a plain indexed equality match (`{ workspaceId, module, createdAt: -1 }` index), not an `action: { $in: [...] }` expansion; if both `module` and `action` query params are given, both filters apply (AND). The frontend just reads `log.module` straight off the response now (it used to derive it client-side from `action` — that fallback logic still exists in `features/activity/utils/activityMeta.ts` but is unused for this) — keep the backend util's grouping in sync when adding a new `ActivityAction`, or the schema's `enum: ACTIVITY_MODULES` will reject writes for it.
 - `findByWorkspace()` also populates `taskId` (title only) and `projectId` (name only) alongside the usual `actorId` (name/email/avatarUrl), so the frontend table/drawer can show context without extra requests.
+- `GET /workspaces/:workspaceId/activity/:logId` (`WorkspaceActivityController.findOne` → `ActivityService.findOneForWorkspace()`) fetches one entry by id, same population as the list. It exists solely for the dashboard's Recent Activity widget deep-linking straight to one entry — that entry is not guaranteed to be on the Activity Log page's current filtered/paged view, so the frontend fetches it directly instead of asking the page to page/filter until it surfaces. 404s if the id doesn't exist or belongs to a different workspace.
 - No `LOGIN`/`RESTORE` actions exist in the backend enum yet — the frontend's action→color/icon category mapping (create/update/delete/restore/login) still defines buckets for them since the reference design called for 5 categories; they're just currently unreachable until a login-activity or restore-activity is logged somewhere.
 - `ActivityLog` also stores request metadata captured at write time: `ip`, `browser`, `os`, `device` (all nullable strings). Populated by `ActivityService.log()` from two sources — see `common/context/request-context.ts` and `common/middleware/request-context.middleware.ts`:
   - `RequestContextMiddleware` is registered globally (`AppModule.configure()`, `forRoutes('*')`) and stashes each request's IP (`X-Forwarded-For`'s first hop, falling back to `req.ip`) and raw `User-Agent` header into an `AsyncLocalStorage` (`requestContext`) for the duration of that request's async context.
@@ -570,6 +571,14 @@ schema and writes nothing.
 - **One endpoint, one response**: `GET /workspaces/:workspaceId/dashboard/overview`.
   There is deliberately no per-widget endpoint — every number on the page comes from
   this call so the KPI cards, charts and lists can never disagree.
+- **Optional `?projectId=` narrows the whole response to one project.**
+  `DashboardService.getOverview()` validates it with `ProjectsService.findOne()` first
+  (404 if it doesn't exist or isn't in this workspace — the same check any other
+  project-scoped endpoint does), then threads it into all three pipelines as a plain
+  extra `$match` clause (`{ ...(projectId ? { projectId } : {}) }`) — top-level in the
+  task pipeline (so every `$facet` branch inherits it for free), and into the
+  activity/notifications pipelines' own `$match` the same way. Omitted, the response
+  is exactly the old workspace-wide shape — this is additive, not a breaking change.
 - **Three aggregations, not eight `countDocuments()`**. `DashboardService.getOverview()`
   fires them with `Promise.all`:
   - `pipelines/task-overview.pipeline.ts` — the big one. A single `$match` +

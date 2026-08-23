@@ -14,6 +14,7 @@ import {
   ActivityLogDocument,
 } from '@modules/activity/schemas/activity-log.schema';
 import { WorkspacesService } from '@modules/workspaces/workspaces.service';
+import { ProjectsService } from '@modules/projects/projects.service';
 import { toObjectId } from '@common/utils/object-id';
 import { buildDashboardRanges } from './utils/date-ranges';
 import { buildTaskOverviewPipeline } from './pipelines/task-overview.pipeline';
@@ -43,6 +44,7 @@ export class DashboardService {
     @InjectModel(ActivityLog.name)
     private activityLogModel: Model<ActivityLogDocument>,
     private workspacesService: WorkspacesService,
+    private projectsService: ProjectsService,
   ) {}
 
   /**
@@ -59,17 +61,31 @@ export class DashboardService {
    *  - KPIs 1–3, both donut charts, Upcoming Deadlines, Sprint Progress and
    *    Recent Activity are **workspace-wide** — this is a team dashboard.
    *  - My Tasks and the unread-notifications KPI are **the caller's own**.
+   *
+   * `projectId`, when given, narrows every workspace-wide number to that one
+   * project — the dashboard's project filter. `undefined`/omitted keeps the
+   * previous workspace-wide behavior unchanged.
    */
   async getOverview(
     workspaceId: string,
     user: UserDocument,
+    projectId?: string,
   ): Promise<DashboardOverview> {
     // throws 404 if the workspace doesn't exist, 403 if the caller isn't a
     // member — the only permission gate the dashboard needs, since every
     // pipeline below is scoped to this one workspace
     await this.workspacesService.findOne(workspaceId, user);
 
+    // Validates the project both exists and belongs to this workspace (and
+    // that the caller is a member) — throws 404 otherwise, the same as any
+    // other project-scoped endpoint. Nothing about the result is used beyond
+    // that check.
+    if (projectId) {
+      await this.projectsService.findOne(workspaceId, projectId, user);
+    }
+
     const workspaceObjectId = toObjectId(workspaceId);
+    const projectObjectId = projectId ? toObjectId(projectId) : null;
     const userId = user._id as Types.ObjectId;
     const ranges = buildDashboardRanges();
 
@@ -79,6 +95,7 @@ export class DashboardService {
           buildTaskOverviewPipeline({
             workspaceId: workspaceObjectId,
             userId,
+            projectId: projectObjectId,
             ranges,
             collections: {
               // read off the models rather than hardcoded, so a schema's
@@ -96,6 +113,7 @@ export class DashboardService {
           buildNotificationsKpiPipeline({
             recipientId: userId,
             workspaceId: workspaceObjectId,
+            projectId: projectObjectId,
             ranges,
           }),
         )
@@ -105,6 +123,7 @@ export class DashboardService {
         .aggregate<ActivityPipelineResult>(
           buildActivityPipeline({
             workspaceId: workspaceObjectId,
+            projectId: projectObjectId,
             limit: RECENT_ACTIVITY_LIMIT,
             ranges,
             collections: {

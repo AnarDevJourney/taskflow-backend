@@ -5,6 +5,8 @@ import { facetCountExpr, percentChangeExpr } from './dashboard.expressions';
 export interface NotificationsKpiPipelineParams {
   recipientId: Types.ObjectId;
   workspaceId: Types.ObjectId;
+  /** narrows the count to one project when the dashboard's project filter is set */
+  projectId: Types.ObjectId | null;
   ranges: DashboardRanges;
 }
 
@@ -25,13 +27,14 @@ export interface NotificationsKpiPipelineParams {
 export function buildNotificationsKpiPipeline({
   recipientId,
   workspaceId,
+  projectId,
   ranges,
 }: NotificationsKpiPipelineParams): PipelineStage[] {
   const { weekStart } = ranges;
 
   return [
     // served by the { recipientId, isRead, createdAt } index
-    { $match: { recipientId, workspaceId } },
+    { $match: { recipientId, workspaceId, ...(projectId ? { projectId } : {}) } },
     {
       $facet: {
         unread: [{ $match: { isRead: false } }, { $count: 'count' }],

@@ -42,4 +42,25 @@ export class WorkspaceActivityController {
 
     return this.activityService.findByWorkspace(workspaceId, query);
   }
+
+  @Get(':logId')
+  @ApiOperation({
+    summary:
+      'Get a single workspace activity log entry by id — powers the dashboard Recent Activity widget deep-linking straight to one entry regardless of the Activity Log page\'s current filters/page',
+  })
+  @ApiParam({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace' })
+  @ApiParam({ name: 'logId', description: 'MongoDB ObjectId of the activity log entry' })
+  @ApiResponse({ status: 200, description: 'The activity log entry, with actor/task/project details' })
+  @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a workspace member' })
+  @ApiResponse({ status: 404, description: 'Workspace or log entry not found' })
+  async findOne(
+    @Param('workspaceId') workspaceId: string,
+    @Param('logId') logId: string,
+    @CurrentUser() user: UserDocument,
+  ) {
+    await this.workspacesService.findOne(workspaceId, user);
+
+    return this.activityService.findOneForWorkspace(workspaceId, logId);
+  }
 }

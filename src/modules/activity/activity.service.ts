@@ -149,6 +149,26 @@ export class ActivityService {
     return { items, meta: buildPaginationMeta(total, page, take) };
   }
 
+  // ─── Get one workspace activity entry (dashboard deep link) ──────
+  // The dashboard's Recent Activity widget links straight to one log entry,
+  // which is not necessarily on the Activity Log page's current (filtered,
+  // paginated) page — so this fetches it directly by id rather than asking
+  // the caller to page/filter until they find it. Same population as the
+  // list, so `ActivityDetailDrawer` renders it identically either way.
+  async findOneForWorkspace(
+    workspaceId: string,
+    logId: string,
+  ): Promise<ActivityLogDocument> {
+    const log = await this.activityLogModel
+      .findOne({ _id: toObjectId(logId), workspaceId: toObjectId(workspaceId) })
+      .populate('actorId', 'name email avatarUrl')
+      .populate('taskId', 'title')
+      .populate('projectId', 'name');
+
+    if (!log) throw new NotFoundException('Activity log entry not found');
+    return log;
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────
   private toObjId(id: string | Types.ObjectId): Types.ObjectId {
     if (id instanceof Types.ObjectId) return id;
