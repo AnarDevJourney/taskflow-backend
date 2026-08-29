@@ -8,10 +8,13 @@ import { LoggingInterceptor } from '@common/interceptors/logging.interceptor';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import * as cookieParser from 'cookie-parser';
 import { AppConfigService } from '@config/config.service';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const appConfig = app.get(AppConfigService);
+
+  app.use(helmet());
 
   app.use(cookieParser());
 
@@ -59,8 +62,26 @@ async function bootstrap() {
           '(valid 7 days, scoped to that path only) and issues new tokens.',
       )
       .setVersion('1.0')
-      .addCookieAuth('access_token', { type: 'apiKey', in: 'cookie', name: 'access_token', description: 'JWT access token — set automatically by login/register' }, 'cookie-access-token')
-      .addCookieAuth('refresh_token', { type: 'apiKey', in: 'cookie', name: 'refresh_token', description: 'JWT refresh token — used only by POST /auth/refresh' }, 'cookie-refresh-token')
+      .addCookieAuth(
+        'access_token',
+        {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'access_token',
+          description: 'JWT access token — set automatically by login/register',
+        },
+        'cookie-access-token',
+      )
+      .addCookieAuth(
+        'refresh_token',
+        {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'refresh_token',
+          description: 'JWT refresh token — used only by POST /auth/refresh',
+        },
+        'cookie-refresh-token',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
