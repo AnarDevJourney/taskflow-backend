@@ -183,17 +183,23 @@ export class AuthController {
   ) {
     const isProd = this.config.isProduction;
 
+    // 'none' in production: the frontend (Netlify) and API live on different
+    // domains, so every request is cross-site from the browser's point of
+    // view — 'strict'/'lax' would silently stop the cookie from ever being
+    // sent back. 'none' requires 'secure: true', which isProd already gives
+    // us (both hosts serve HTTPS). Dev keeps 'lax' since localhost:5173 →
+    // localhost:3000 doesn't need it and 'lax' is the safer default there.
     res.cookie('access_token', accessToken, {
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? 'strict' : 'lax',
+      sameSite: isProd ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000, // 15 minutes in ms
     });
 
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? 'strict' : 'lax',
+      sameSite: isProd ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
       path: '/api/v1/auth/refresh', // refresh token only sent to this endpoint
     });
