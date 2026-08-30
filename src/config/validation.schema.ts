@@ -1,5 +1,20 @@
 import * as Joi from 'joi';
 
+// Placeholder secrets checked into .env / .env.docker as templates — must
+// never make it into a real deployment. Keep this list in sync with
+// scripts/prod.sh's own placeholder check.
+const PLACEHOLDER_JWT_SECRETS = [
+  'your-super-secret-key-min-32-chars-here',
+  'your-refresh-secret-key-min-32-chars',
+  'replace-this-with-a-real-32-char-minimum-secret',
+  'replace-this-with-a-different-32-char-secret',
+];
+
+// MinIO's own default credentials — shipped as the default in .env / .env.docker
+// so local Docker Compose works out of the box. Fine for local dev; anyone
+// reaching the MinIO console/API with these gets full read/write on every bucket.
+const DEFAULT_MINIO_CREDENTIAL = 'minioadmin';
+
 export const validationSchema = Joi.object({
   // App
   NODE_ENV: Joi.string()
@@ -44,4 +59,41 @@ export const validationSchema = Joi.object({
   MAX_UPLOAD_MB: Joi.number().min(1).default(100),
   MAX_IMAGE_UPLOAD_MB: Joi.number().min(1).default(5),
   PRESIGNED_URL_EXPIRY: Joi.number().min(1).max(604800).default(3600),
-});
+})
+  // Cross-field / production-only checks a per-key schema can't express.
+  // Runs after every individual key already passed its own rule above.
+  .custom((env, helpers) => {
+    if (env.NODE_ENV !== 'production') return env;
+
+    for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET']) {
+      if (PLACEHOLDER_JWT_SECRETS.includes(env[key])) {
+        return helpers.message({
+          custom:
+            `${key} is still the checked-in placeholder value — refusing to start in ` +
+            'production. Generate a real secret (e.g. `openssl rand -hex 32`) and set ' +
+            'it in .env.docker.',
+        });
+      }
+    }
+
+    if (env.JWT_SECRET === env.JWT_REFRESH_SECRET) {
+      return helpers.message({
+        custom:
+          'JWT_SECRET and JWT_REFRESH_SECRET must be different values — refusing to ' +
+          'start in production.',
+      });
+    }
+
+    for (const key of ['MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY']) {
+      if (env[key] === DEFAULT_MINIO_CREDENTIAL) {
+        return helpers.message({
+          custom:
+            `${key} is still the default MinIO credential ("minioadmin") — refusing ` +
+            'to start in production. Set a real access key / secret key on the MinIO ' +
+            'server and in .env.docker.',
+        });
+      }
+    }
+
+    return env;
+  }, 'production secrets check');

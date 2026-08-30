@@ -12,6 +12,8 @@ import {
   Workspace,
   WorkspaceDocument,
 } from '@modules/workspaces/schemas/workspace.schema';
+import { WorkspacesService } from '@modules/workspaces/workspaces.service';
+import { ProjectsService } from '@modules/projects/projects.service';
 import { toObjectId } from '@common/utils/object-id';
 
 const MAX_RESULTS = 10;
@@ -23,6 +25,8 @@ export class SearchService {
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Workspace.name) private workspaceModel: Model<WorkspaceDocument>,
+    private workspacesService: WorkspacesService,
+    private projectsService: ProjectsService,
   ) {}
 
   // ─── Global search ───────────────────────────────────────────────
@@ -31,6 +35,10 @@ export class SearchService {
     if (!query || query.trim().length < 2) {
       return { tasks: [], projects: [], members: [] };
     }
+
+    // throws 404/403 if the workspace doesn't exist or the user isn't a
+    // member — must run before any workspace-scoped data is read
+    await this.workspacesService.findOne(workspaceId, user);
 
     const wsId = toObjectId(workspaceId);
     const q = query.trim();
@@ -116,8 +124,17 @@ export class SearchService {
 
   // ─── Task search within a project ────────────────────────────────
   // used by the project board quick filter
-  async searchInProject(query: string, projectId: string, workspaceId: string) {
+  async searchInProject(
+    query: string,
+    projectId: string,
+    workspaceId: string,
+    user: UserDocument,
+  ) {
     if (!query || query.trim().length < 2) return [];
+
+    // throws 404/403 if the project/workspace doesn't exist or the user
+    // isn't a project/workspace member
+    await this.projectsService.findOne(workspaceId, projectId, user);
 
     const q = query.trim();
 

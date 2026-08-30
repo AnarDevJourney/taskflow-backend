@@ -26,6 +26,8 @@ export class SearchController {
   @ApiResponse({ status: 200, description: 'Returns { tasks, projects, members } — up to 10 results per category' })
   @ApiResponse({ status: 400, description: 'Invalid workspaceId format' })
   @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a workspace member' })
+  @ApiResponse({ status: 404, description: 'Workspace not found' })
   globalSearch(
     @Query('q') query: string,
     @Query('workspaceId') workspaceId: string,
@@ -43,11 +45,14 @@ export class SearchController {
   @ApiQuery({ name: 'workspaceId', description: 'MongoDB ObjectId of the workspace', example: '507f1f77bcf86cd799439010' })
   @ApiResponse({ status: 200, description: 'Array of matching tasks with assignee details — up to 10 results' })
   @ApiResponse({ status: 401, description: 'Not authenticated' })
+  @ApiResponse({ status: 403, description: 'Not a project or workspace member' })
+  @ApiResponse({ status: 404, description: 'Project or workspace not found' })
   searchInProject(
     @Param('projectId') projectId: string,
     @Query('q') query: string,
     @Query('workspaceId') workspaceId: string,
+    @CurrentUser() user: UserDocument,
   ) {
-    return this.searchService.searchInProject(query, projectId, workspaceId);
+    return this.searchService.searchInProject(query, projectId, workspaceId, user);
   }
 }

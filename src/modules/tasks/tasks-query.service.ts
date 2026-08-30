@@ -10,6 +10,8 @@ import {
   PaginatedResult,
 } from '@common/utils/pagination';
 import { toObjectId } from '@common/utils/object-id';
+import { ProjectsService } from '@modules/projects/projects.service';
+import { UserDocument } from '@modules/users/schemas/user.schema';
 
 // escape regex special characters so a free-typed status filter can't be
 // interpreted as a regex pattern
@@ -19,12 +21,21 @@ function escapeRegex(value: string): string {
 
 @Injectable()
 export class TasksQueryService {
-  constructor(@InjectModel(Task.name) private taskModel: Model<TaskDocument>) {}
+  constructor(
+    @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
+    private projectsService: ProjectsService,
+  ) {}
 
   async findAll(
+    workspaceId: string,
     projectId: string,
     query: QueryTasksDto,
+    user: UserDocument,
   ): Promise<PaginatedResult<TaskDocument>> {
+    // throws 404/403 if the project doesn't exist or the user isn't a
+    // project/workspace member — must run before any task data is read
+    await this.projectsService.findOne(workspaceId, projectId, user);
+
     const filter = this.buildFilter(projectId, query);
     const sort = this.buildSort(query);
     const { skip, limit, page } = getPaginationParams(query);

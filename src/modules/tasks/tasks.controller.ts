@@ -71,8 +71,8 @@ export class TasksController {
     @Query() query: QueryTasksDto,
     @CurrentUser() user: UserDocument,
   ) {
-    // first validate membership via projectsService (inside tasksQueryService)
-    return this.tasksQueryService.findAll(projectId, query);
+    // validates membership via projectsService (inside tasksQueryService)
+    return this.tasksQueryService.findAll(workspaceId, projectId, query, user);
   }
 
   @Get(':taskId')

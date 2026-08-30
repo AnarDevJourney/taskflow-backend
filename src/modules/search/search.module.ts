@@ -12,6 +12,8 @@ import {
   Workspace,
   WorkspaceSchema,
 } from '@modules/workspaces/schemas/workspace.schema';
+import { WorkspacesModule } from '@modules/workspaces/workspaces.module';
+import { ProjectsModule } from '@modules/projects/projects.module';
 
 @Module({
   imports: [
@@ -21,8 +23,14 @@ import {
       { name: User.name, schema: UserSchema },
       { name: Workspace.name, schema: WorkspaceSchema },
     ]),
-    // no feature module deps — registers schemas directly
-    // to avoid circular dependency chains
+    // Task/Project/User/Workspace schemas are registered directly (search
+    // needs raw model access for cross-collection queries, not those
+    // modules' services). WorkspacesModule and ProjectsModule are real
+    // imports because membership checking is genuinely
+    // WorkspacesService.findOne() / ProjectsService.findOne()'s job — same
+    // reasoning as DashboardModule.
+    WorkspacesModule,
+    ProjectsModule,
   ],
   controllers: [SearchController],
   providers: [SearchService],
