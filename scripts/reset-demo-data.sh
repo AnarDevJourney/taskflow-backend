@@ -76,7 +76,14 @@ if [ "$status" != "healthy" ]; then
 fi
 
 # ─── 5. Re-seed the demo data ───────────────────────────────────
+# Can't use `npm run seed:docker` here — that runs seed.ts through
+# ts-node, which only exists in the dev image (the prod image is built
+# with `npm ci --omit=dev`). nest build already compiles seed.ts to
+# dist/database/seed.js, so run that directly instead. SEED_ENV=docker
+# is harmless but unnecessary here: DATABASE_URI etc. are already in the
+# container's env via compose's `env_file`, not read from a .env.docker
+# file on disk (which doesn't exist inside this image in the first place).
 log "🌱 Re-seeding demo data..."
-docker exec taskflow-api npm run seed:docker
+docker exec taskflow-api node dist/database/seed.js
 
 log "✅ Demo data reset complete."
