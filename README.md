@@ -22,6 +22,7 @@ Built with NestJS, MongoDB, Redis and MinIO. Streaming file uploads, a queue-bac
 ## Table of Contents
 
 - [What is this?](#what-is-this)
+- [Live Demo](#live-demo)
 - [Feature Overview](#feature-overview)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
@@ -52,6 +53,24 @@ backed by MongoDB, Redis/BullMQ, and MinIO.
 
 The companion [frontend](https://github.com/AnarDevJourney/taskflow-frontend) is a
 React 19 SPA that consumes this API — the two are independently deployable services.
+
+---
+
+## Live Demo
+
+This API is deployed on a Hetzner VPS behind Nginx/Let's Encrypt, serving the live
+frontend at **[taskflow-anar.netlify.app](https://taskflow-anar.netlify.app)**.
+
+- **API base URL**: `https://taskflow-api.duckdns.org/api/v1`
+- **Demo login**: `anar@taskflow.dev` / `Test1234!`
+
+> **This is a public demo — feel free to click around, create workspaces/projects/
+> tasks, upload files, invite (fake) members, anything.** Every **6 hours** (00:00,
+> 06:00, 12:00, 18:00 UTC), a scheduled job wipes the database and object storage
+> back to the seeded starting state — see [`scripts/reset-demo-data.sh`](scripts/reset-demo-data.sh).
+> Nothing you do here is permanent, and nothing you do here can break it for the
+> next visitor. If a request errors out with a 401 right after a reset happens
+> mid-session, just log back in with the demo credentials above.
 
 ---
 
@@ -384,6 +403,20 @@ Once running:
 ```bash
 docker exec -it taskflow-api-dev npm run seed:docker
 ```
+
+### Resetting a public demo deployment
+
+`scripts/reset-demo-data.sh` is what the [live demo](#live-demo) runs on a cron
+schedule — it drops the database, clears the MinIO bucket, flushes Redis, restarts
+the API, and re-seeds. It's a **production-only, destructive** tool (built for the
+`docker-compose.prod.yml` container names/network), meant to run unattended:
+
+```bash
+# on the VPS, as a cron job (see the crontab entry set up alongside the deploy)
+0 */6 * * * cd /opt/taskflow-backend && ./scripts/reset-demo-data.sh >> /var/log/taskflow/reset-demo-data.log 2>&1
+```
+
+Never run it against a deployment with real user data.
 
 ### Run without Docker
 
