@@ -43,7 +43,7 @@ log "🗑️  Clearing MinIO bucket..."
 docker run --rm --network "$NETWORK" \
   -e MINIO_ACCESS_KEY="$(grep '^MINIO_ACCESS_KEY=' .env.docker | cut -d= -f2)" \
   -e MINIO_SECRET_KEY="$(grep '^MINIO_SECRET_KEY=' .env.docker | cut -d= -f2)" \
-  --entrypoint /bin/sh minio/mc -c "
+  --entrypoint /bin/sh quay.io/minio/mc -c "
     mc alias set local http://minio:9000 \$MINIO_ACCESS_KEY \$MINIO_SECRET_KEY > /dev/null &&
     mc rm --recursive --force local/$MINIO_BUCKET/ > /dev/null 2>&1 || true
   "
